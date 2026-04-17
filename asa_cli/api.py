@@ -102,6 +102,7 @@ class SearchAdsClient:
         data: Optional[dict] = None,
         params: Optional[dict] = None,
         _retry_count: int = 0,
+        skip_org_context: bool = False,
     ) -> dict[str, Any]:
         """Make an authenticated API request with automatic retry on auth failure.
 
@@ -111,6 +112,7 @@ class SearchAdsClient:
             data: Request body data
             params: Query parameters
             _retry_count: Internal retry counter (do not set manually)
+            skip_org_context: If True, omit the X-AP-Context header (for /acls, /me)
 
         Returns:
             API response as dict
@@ -127,9 +129,10 @@ class SearchAdsClient:
         url = f"{API_BASE_URL}{endpoint}"
         headers = {
             "Authorization": f"Bearer {self._get_access_token()}",
-            "X-AP-Context": f"orgId={self.credentials.org_id}",
             "Content-Type": "application/json",
         }
+        if not skip_org_context:
+            headers["X-AP-Context"] = f"orgId={self.credentials.org_id}"
 
         response = requests.request(
             method=method,
@@ -146,7 +149,7 @@ class SearchAdsClient:
             self._access_token = None
             self._token_expiry = None
             # Retry the request
-            return self._request(method, endpoint, data, params, _retry_count + 1)
+            return self._request(method, endpoint, data, params, _retry_count + 1, skip_org_context)
 
         if response.status_code >= 400:
             error_msg = f"API error {response.status_code}: {response.text}"
@@ -587,6 +590,262 @@ class SearchAdsClient:
             return False
 
     # =========================================================================
+    # Campaign Negative Keyword CRUD Operations
+    # =========================================================================
+
+    def find_campaign_negative_keywords(
+        self, campaign_id: int, conditions: Optional[list[dict[str, Any]]] = None
+    ) -> list[dict[str, Any]]:
+        """Find campaign-level negative keywords using selector conditions.
+
+        Args:
+            campaign_id: Campaign ID
+            conditions: Optional selector conditions for filtering
+
+        Returns:
+            List of matching negative keywords
+        """
+        try:
+            selector: dict[str, Any] = {
+                "pagination": {"offset": 0, "limit": 1000},
+            }
+            if conditions:
+                selector["conditions"] = conditions
+
+            data = {"selector": selector}
+            response = self._request(
+                "POST",
+                f"/campaigns/{campaign_id}/negativekeywords/find",
+                data=data,
+            )
+            return response.get("data", []) if isinstance(response, dict) else []
+        except Exception as e:
+            console.print(f"[red]Error finding campaign negative keywords: {e}[/red]")
+            return []
+
+    def update_campaign_negative_keywords(
+        self, campaign_id: int, updates: list[dict[str, Any]]
+    ) -> Optional[list[dict[str, Any]]]:
+        """Update campaign-level negative keywords in bulk.
+
+        Args:
+            campaign_id: Campaign ID
+            updates: List of update dicts, e.g. [{"id": 123, "status": "PAUSED"}, ...]
+
+        Returns:
+            List of updated keyword data, or None on failure
+        """
+        if not updates:
+            return []
+
+        try:
+            response = self._request(
+                "PUT",
+                f"/campaigns/{campaign_id}/negativekeywords/bulk",
+                data=updates,
+            )
+            return response.get("data") if isinstance(response, dict) else None
+        except Exception as e:
+            console.print(f"[red]Error updating campaign negative keywords: {e}[/red]")
+            return None
+
+    def delete_campaign_negative_keywords(
+        self, campaign_id: int, keyword_ids: list[int]
+    ) -> bool:
+        """Delete campaign-level negative keywords in bulk.
+
+        Args:
+            campaign_id: Campaign ID
+            keyword_ids: List of negative keyword IDs to delete
+
+        Returns:
+            True on success, False on failure
+        """
+        if not keyword_ids:
+            return True
+
+        try:
+            self._request(
+                "POST",
+                f"/campaigns/{campaign_id}/negativekeywords/delete/bulk",
+                data=keyword_ids,
+            )
+            return True
+        except Exception as e:
+            console.print(f"[red]Error deleting campaign negative keywords: {e}[/red]")
+            return False
+
+    # =========================================================================
+    # Ad Group Negative Keyword CRUD Operations
+    # =========================================================================
+
+    def get_ad_group_negative_keywords(
+        self, campaign_id: int, ad_group_id: int
+    ) -> list[dict[str, Any]]:
+        """Get ad group-level negative keywords (handles pagination).
+
+        Args:
+            campaign_id: Campaign ID
+            ad_group_id: Ad group ID
+
+        Returns:
+            List of negative keywords
+        """
+        try:
+            return self._get_all_paginated(
+                f"/campaigns/{campaign_id}/adgroups/{ad_group_id}/negativekeywords"
+            )
+        except Exception as e:
+            console.print(f"[red]Error fetching ad group negative keywords: {e}[/red]")
+            return []
+
+    def find_ad_group_negative_keywords(
+        self, campaign_id: int, conditions: Optional[list[dict[str, Any]]] = None
+    ) -> list[dict[str, Any]]:
+        """Find ad group-level negative keywords across all ad groups using selector conditions.
+
+        Args:
+            campaign_id: Campaign ID
+            conditions: Optional selector conditions for filtering
+
+        Returns:
+            List of matching negative keywords
+        """
+        try:
+            selector: dict[str, Any] = {
+                "pagination": {"offset": 0, "limit": 1000},
+            }
+            if conditions:
+                selector["conditions"] = conditions
+
+            data = {"selector": selector}
+            response = self._request(
+                "POST",
+                f"/campaigns/{campaign_id}/adgroups/negativekeywords/find",
+                data=data,
+            )
+            return response.get("data", []) if isinstance(response, dict) else []
+        except Exception as e:
+            console.print(f"[red]Error finding ad group negative keywords: {e}[/red]")
+            return []
+
+    def update_ad_group_negative_keywords(
+        self, campaign_id: int, ad_group_id: int, updates: list[dict[str, Any]]
+    ) -> Optional[list[dict[str, Any]]]:
+        """Update ad group-level negative keywords in bulk.
+
+        Args:
+            campaign_id: Campaign ID
+            ad_group_id: Ad group ID
+            updates: List of update dicts, e.g. [{"id": 123, "status": "PAUSED"}, ...]
+
+        Returns:
+            List of updated keyword data, or None on failure
+        """
+        if not updates:
+            return []
+
+        try:
+            response = self._request(
+                "PUT",
+                f"/campaigns/{campaign_id}/adgroups/{ad_group_id}/negativekeywords/bulk",
+                data=updates,
+            )
+            return response.get("data") if isinstance(response, dict) else None
+        except Exception as e:
+            console.print(f"[red]Error updating ad group negative keywords: {e}[/red]")
+            return None
+
+    def delete_ad_group_negative_keywords(
+        self, campaign_id: int, ad_group_id: int, keyword_ids: list[int]
+    ) -> bool:
+        """Delete ad group-level negative keywords in bulk.
+
+        Args:
+            campaign_id: Campaign ID
+            ad_group_id: Ad group ID
+            keyword_ids: List of negative keyword IDs to delete
+
+        Returns:
+            True on success, False on failure
+        """
+        if not keyword_ids:
+            return True
+
+        try:
+            self._request(
+                "POST",
+                f"/campaigns/{campaign_id}/adgroups/{ad_group_id}/negativekeywords/delete/bulk",
+                data=keyword_ids,
+            )
+            return True
+        except Exception as e:
+            console.print(f"[red]Error deleting ad group negative keywords: {e}[/red]")
+            return False
+
+    # =========================================================================
+    # Bulk Targeting Keyword Operations
+    # =========================================================================
+
+    def update_keywords_bulk(
+        self, campaign_id: int, ad_group_id: int, updates: list[dict[str, Any]]
+    ) -> Optional[list[dict[str, Any]]]:
+        """Update targeting keywords in bulk.
+
+        Args:
+            campaign_id: Campaign ID
+            ad_group_id: Ad group ID
+            updates: List of update dicts, e.g.
+                [{"id": 123, "bidAmount": {"amount": "2.5", "currency": "USD"}}, ...]
+
+        Returns:
+            List of updated keyword data, or None on failure
+        """
+        if not updates:
+            return []
+
+        try:
+            response = self._request(
+                "PUT",
+                f"/campaigns/{campaign_id}/adgroups/{ad_group_id}/targetingkeywords/bulk",
+                data=updates,
+            )
+            return response.get("data") if isinstance(response, dict) else None
+        except Exception as e:
+            console.print(f"[red]Error updating keywords in bulk: {e}[/red]")
+            return None
+
+    def find_targeting_keywords(
+        self, campaign_id: int, conditions: Optional[list[dict[str, Any]]] = None
+    ) -> list[dict[str, Any]]:
+        """Find targeting keywords across all ad groups using selector conditions.
+
+        Args:
+            campaign_id: Campaign ID
+            conditions: Optional selector conditions for filtering
+
+        Returns:
+            List of matching targeting keywords
+        """
+        try:
+            selector: dict[str, Any] = {
+                "pagination": {"offset": 0, "limit": 1000},
+            }
+            if conditions:
+                selector["conditions"] = conditions
+
+            data = {"selector": selector}
+            response = self._request(
+                "POST",
+                f"/campaigns/{campaign_id}/adgroups/targetingkeywords/find",
+                data=data,
+            )
+            return response.get("data", []) if isinstance(response, dict) else []
+        except Exception as e:
+            console.print(f"[red]Error finding targeting keywords: {e}[/red]")
+            return []
+
+    # =========================================================================
     # Reporting Operations
     # =========================================================================
 
@@ -797,3 +1056,899 @@ class SearchAdsClient:
             "[yellow]and search popularity scores, or use a third-party ASO tool.[/yellow]"
         )
         return []
+
+    # =========================================================================
+    # Geo Targeting Operations
+    # =========================================================================
+
+    def geo_search(
+        self,
+        query: str,
+        entity: Optional[str] = None,
+        country_code: str = "US",
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Search for geo locations.
+
+        Args:
+            query: Search query string
+            entity: Entity type filter (Country, AdminArea, Locality)
+            country_code: Country code to search within
+            limit: Maximum results to return
+            offset: Pagination offset
+
+        Returns:
+            List of matching geo locations
+        """
+        params: dict[str, Any] = {
+            "query": query,
+            "countrycode": country_code,
+            "limit": limit,
+            "offset": offset,
+        }
+        if entity:
+            params["entity"] = entity
+
+        try:
+            response = self._request("GET", "/search/geo", params=params)
+            return response.get("data", []) if isinstance(response, dict) else []
+        except Exception as e:
+            console.print(f"[red]Error searching geo locations: {e}[/red]")
+            return []
+
+    def get_geo_locations(self, geo_requests: list[dict[str, str]]) -> list[dict[str, Any]]:
+        """Look up specific geo locations by ID and entity.
+
+        Args:
+            geo_requests: List of dicts with 'id' and 'entity' keys,
+                          e.g. [{"id": "US", "entity": "Country"}, ...]
+
+        Returns:
+            List of geo location details
+        """
+        try:
+            response = self._request("POST", "/search/geo", data=geo_requests)
+            return response.get("data", []) if isinstance(response, dict) else []
+        except Exception as e:
+            console.print(f"[red]Error fetching geo locations: {e}[/red]")
+            return []
+
+    def get_campaign_geo_targeting(self, campaign_id: int) -> list[str]:
+        """Get geo targeting (countriesOrRegions) for a campaign.
+
+        Args:
+            campaign_id: Campaign ID
+
+        Returns:
+            List of country/region codes
+        """
+        campaign = self.get_campaign(campaign_id)
+        if campaign:
+            return campaign.get("countriesOrRegions", [])
+        return []
+
+    def update_campaign_countries(
+        self, campaign_id: int, countries: list[str]
+    ) -> Optional[dict[str, Any]]:
+        """Update a campaign's country targeting.
+
+        Sets countriesOrRegions and clearGeoTargetingOnCountryOrRegionChange
+        to reset any sub-country geo targeting when countries change.
+
+        Args:
+            campaign_id: Campaign ID
+            countries: List of country/region codes (e.g. ["US", "CA"])
+
+        Returns:
+            Updated campaign data or None on failure
+        """
+        updates = {
+            "countriesOrRegions": countries,
+            "clearGeoTargetingOnCountryOrRegionChange": True,
+        }
+        return self.update_campaign(campaign_id, updates)
+
+    # =========================================================================
+    # Budget Order Operations
+    # =========================================================================
+
+    def get_budget_orders(self) -> list[dict[str, Any]]:
+        """Get all budget orders for the organization (handles pagination)."""
+        try:
+            return self._get_all_paginated("/budgetorders")
+        except Exception as e:
+            console.print(f"[red]Error fetching budget orders: {e}[/red]")
+            return []
+
+    def get_budget_order(self, bo_id: int) -> Optional[dict[str, Any]]:
+        """Get a specific budget order by ID."""
+        try:
+            response = self._request("GET", f"/budgetorders/{bo_id}")
+            return response.get("data") if isinstance(response, dict) else None
+        except Exception as e:
+            console.print(f"[red]Error fetching budget order {bo_id}: {e}[/red]")
+            return None
+
+    def create_budget_order(
+        self,
+        name: str,
+        budget: float,
+        start_date: str,
+        end_date: str,
+        **kwargs: Any,
+    ) -> Optional[dict[str, Any]]:
+        """Create a new budget order.
+
+        Args:
+            name: Budget order name
+            budget: Budget amount in USD
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            **kwargs: Additional fields (e.g. clientName, primaryBuyerEmail)
+
+        Returns:
+            Created budget order data or None on failure
+        """
+        try:
+            bo_data: dict[str, Any] = {
+                "name": name,
+                "budget": {"amount": str(budget), "currency": "USD"},
+                "startDate": start_date,
+                "endDate": end_date,
+            }
+            bo_data.update(kwargs)
+
+            response = self._request("POST", "/budgetorders", data=bo_data)
+            return response.get("data") if isinstance(response, dict) else None
+        except Exception as e:
+            console.print(f"[red]Error creating budget order: {e}[/red]")
+            return None
+
+    def update_budget_order(self, bo_id: int, updates: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """Update a budget order.
+
+        Args:
+            bo_id: Budget order ID
+            updates: Fields to update
+
+        Returns:
+            Updated budget order data or None on failure
+        """
+        try:
+            response = self._request("PUT", f"/budgetorders/{bo_id}", data=updates)
+            return response.get("data") if isinstance(response, dict) else None
+        except Exception as e:
+            console.print(f"[red]Error updating budget order {bo_id}: {e}[/red]")
+            return None
+
+    def get_campaign_budget_status(self) -> list[dict[str, Any]]:
+        """Get budget status for all campaigns, including spend data.
+
+        Returns a list of dicts with campaign info and budget fields:
+            id, name, budgetAmount, dailyBudgetAmount, status, displayStatus,
+            totalSpend (from report data).
+        """
+        campaigns = self.get_campaigns()
+        if not campaigns:
+            return []
+
+        # Fetch campaign reports for spend data
+        report_rows = self.get_campaign_report()
+        spend_by_campaign: dict[int, float] = {}
+        for row in report_rows:
+            cid = row.get("metadata", {}).get("campaignId")
+            totals = row.get("total", {})
+            spend = float(totals.get("localSpend", {}).get("amount", 0))
+            if cid:
+                spend_by_campaign[cid] = spend
+
+        results: list[dict[str, Any]] = []
+        for campaign in campaigns:
+            cid = campaign.get("id")
+            results.append({
+                "id": cid,
+                "name": campaign.get("name", ""),
+                "budgetAmount": campaign.get("budgetAmount"),
+                "dailyBudgetAmount": campaign.get("dailyBudgetAmount"),
+                "status": campaign.get("status", "UNKNOWN"),
+                "displayStatus": campaign.get("displayStatus", "UNKNOWN"),
+                "servingStatus": campaign.get("servingStatus", "UNKNOWN"),
+                "totalSpend": spend_by_campaign.get(cid, 0.0),
+            })
+
+        return results
+
+    # =========================================================================
+    # ACL / User / App Search Operations
+    # =========================================================================
+
+    def get_acls(self) -> list[dict[str, Any]]:
+        """Get access control list (organizations and roles).
+
+        This endpoint does NOT require the X-AP-Context header.
+        """
+        try:
+            response = self._request("GET", "/acls", skip_org_context=True)
+            return response.get("data", []) if isinstance(response, dict) else []
+        except Exception as e:
+            console.print(f"[red]Error fetching ACLs: {e}[/red]")
+            return []
+
+    def get_me(self) -> Optional[dict[str, Any]]:
+        """Get current user info.
+
+        This endpoint does NOT require the X-AP-Context header.
+        """
+        try:
+            response = self._request("GET", "/me", skip_org_context=True)
+            return response.get("data") if isinstance(response, dict) else None
+        except Exception as e:
+            console.print(f"[red]Error fetching user info: {e}[/red]")
+            return None
+
+    def search_apps(
+        self, query: str, return_owned: bool = True, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Search for iOS apps on the App Store.
+
+        Args:
+            query: Search query string
+            return_owned: If True, only return apps owned by the org
+            limit: Maximum results to return
+
+        Returns:
+            List of matching app records
+        """
+        params = {
+            "query": query,
+            "returnOwnedApps": str(return_owned).lower(),
+            "limit": limit,
+        }
+        try:
+            response = self._request("GET", "/search/apps", params=params)
+            return response.get("data", []) if isinstance(response, dict) else []
+        except Exception as e:
+            console.print(f"[red]Error searching apps: {e}[/red]")
+            return []
+
+    def get_app_eligibility(
+        self, adam_id: int, conditions: Optional[list[str]] = None
+    ) -> Optional[dict[str, Any]]:
+        """Get advertising eligibility for an app.
+
+        Args:
+            adam_id: Apple App ID
+            conditions: Optional list of eligibility conditions to check
+
+        Returns:
+            Eligibility data or None on failure
+        """
+        try:
+            data = {}
+            if conditions:
+                data["conditions"] = conditions
+            response = self._request(
+                "POST", f"/apps/{adam_id}/eligibilities/find", data=data
+            )
+            return response.get("data") if isinstance(response, dict) else None
+        except Exception as e:
+            console.print(f"[red]Error fetching app eligibility for {adam_id}: {e}[/red]")
+            return None
+
+    def get_supported_countries(
+        self, countries: Optional[list[str]] = None
+    ) -> list[dict[str, Any]]:
+        """Get supported countries/regions for advertising.
+
+        Args:
+            countries: Optional list of country codes to filter
+
+        Returns:
+            List of supported country/region records
+        """
+        params: dict[str, Any] = {}
+        if countries:
+            params["countriesOrRegions"] = ",".join(countries)
+        try:
+            response = self._request("GET", "/countries-or-regions", params=params)
+            return response.get("data", []) if isinstance(response, dict) else []
+        except Exception as e:
+            console.print(f"[red]Error fetching supported countries: {e}[/red]")
+            return []
+
+    def get_app_preview_device_sizes(self) -> list[dict[str, Any]]:
+        """Get creative app mapping device sizes for ad previews.
+
+        Returns:
+            List of device size records
+        """
+        try:
+            response = self._request("GET", "/creativeappmappings/devices")
+            return response.get("data", []) if isinstance(response, dict) else []
+        except Exception as e:
+            console.print(f"[red]Error fetching device sizes: {e}[/red]")
+            return []
+
+    # =========================================================================
+    # Ad Operations
+    # =========================================================================
+
+    def get_ads(self, campaign_id: int, ad_group_id: int) -> list[dict[str, Any]]:
+        """Get all ads for an ad group (handles pagination).
+
+        Args:
+            campaign_id: Campaign ID
+            ad_group_id: Ad group ID
+
+        Returns:
+            List of ads
+        """
+        try:
+            return self._get_all_paginated(
+                f"/campaigns/{campaign_id}/adgroups/{ad_group_id}/ads"
+            )
+        except Exception as e:
+            console.print(f"[red]Error fetching ads: {e}[/red]")
+            return []
+
+    def get_ad(
+        self, campaign_id: int, ad_group_id: int, ad_id: int
+    ) -> Optional[dict[str, Any]]:
+        """Get a specific ad by ID.
+
+        Args:
+            campaign_id: Campaign ID
+            ad_group_id: Ad group ID
+            ad_id: Ad ID
+
+        Returns:
+            Ad data or None on failure
+        """
+        try:
+            response = self._request(
+                "GET",
+                f"/campaigns/{campaign_id}/adgroups/{ad_group_id}/ads/{ad_id}",
+            )
+            return response.get("data") if isinstance(response, dict) else None
+        except Exception as e:
+            console.print(f"[red]Error fetching ad {ad_id}: {e}[/red]")
+            return None
+
+    def create_ad(
+        self,
+        campaign_id: int,
+        ad_group_id: int,
+        creative_id: int,
+        name: str,
+        status: str = "ENABLED",
+    ) -> Optional[dict[str, Any]]:
+        """Create an ad in an ad group.
+
+        Args:
+            campaign_id: Campaign ID
+            ad_group_id: Ad group ID
+            creative_id: Creative ID to associate with the ad
+            name: Ad name
+            status: Initial status (ENABLED or PAUSED)
+
+        Returns:
+            Created ad data or None on failure
+        """
+        try:
+            ad_data = {
+                "name": name,
+                "creativeId": creative_id,
+                "status": status,
+            }
+            response = self._request(
+                "POST",
+                f"/campaigns/{campaign_id}/adgroups/{ad_group_id}/ads",
+                data=ad_data,
+            )
+            return response.get("data") if isinstance(response, dict) else None
+        except Exception as e:
+            console.print(f"[red]Error creating ad: {e}[/red]")
+            return None
+
+    def update_ad(
+        self, campaign_id: int, ad_group_id: int, ad_id: int, updates: dict[str, Any]
+    ) -> Optional[dict[str, Any]]:
+        """Update an ad.
+
+        Args:
+            campaign_id: Campaign ID
+            ad_group_id: Ad group ID
+            ad_id: Ad ID
+            updates: Fields to update
+
+        Returns:
+            Updated ad data or None on failure
+        """
+        try:
+            response = self._request(
+                "PUT",
+                f"/campaigns/{campaign_id}/adgroups/{ad_group_id}/ads/{ad_id}",
+                data=updates,
+            )
+            return response.get("data") if isinstance(response, dict) else None
+        except Exception as e:
+            console.print(f"[red]Error updating ad {ad_id}: {e}[/red]")
+            return None
+
+    def delete_ad(self, campaign_id: int, ad_group_id: int, ad_id: int) -> bool:
+        """Delete an ad.
+
+        Args:
+            campaign_id: Campaign ID
+            ad_group_id: Ad group ID
+            ad_id: Ad ID
+
+        Returns:
+            True on success, False on failure
+        """
+        try:
+            self._request(
+                "DELETE",
+                f"/campaigns/{campaign_id}/adgroups/{ad_group_id}/ads/{ad_id}",
+            )
+            return True
+        except Exception as e:
+            console.print(f"[red]Error deleting ad {ad_id}: {e}[/red]")
+            return False
+
+    def find_ads(
+        self, campaign_id: Optional[int] = None, conditions: Optional[list[dict[str, Any]]] = None
+    ) -> list[dict[str, Any]]:
+        """Find ads using selector conditions.
+
+        Args:
+            campaign_id: Optional campaign ID to scope the search
+            conditions: Optional selector conditions for filtering
+
+        Returns:
+            List of matching ads
+        """
+        try:
+            selector: dict[str, Any] = {
+                "pagination": {"offset": 0, "limit": 1000},
+            }
+            if conditions:
+                selector["conditions"] = conditions
+
+            data = {"selector": selector}
+
+            if campaign_id:
+                endpoint = f"/campaigns/{campaign_id}/ads/find"
+            else:
+                endpoint = "/ads/find"
+
+            response = self._request("POST", endpoint, data=data)
+            return response.get("data", []) if isinstance(response, dict) else []
+        except Exception as e:
+            console.print(f"[red]Error finding ads: {e}[/red]")
+            return []
+
+    # =========================================================================
+    # Creative Operations
+    # =========================================================================
+
+    def get_creatives(self) -> list[dict[str, Any]]:
+        """Get all creatives (handles pagination).
+
+        Returns:
+            List of creatives
+        """
+        try:
+            return self._get_all_paginated("/creatives")
+        except Exception as e:
+            console.print(f"[red]Error fetching creatives: {e}[/red]")
+            return []
+
+    def get_creative(self, creative_id: int) -> Optional[dict[str, Any]]:
+        """Get a specific creative by ID.
+
+        Args:
+            creative_id: Creative ID
+
+        Returns:
+            Creative data or None on failure
+        """
+        try:
+            response = self._request("GET", f"/creatives/{creative_id}")
+            return response.get("data") if isinstance(response, dict) else None
+        except Exception as e:
+            console.print(f"[red]Error fetching creative {creative_id}: {e}[/red]")
+            return None
+
+    def create_creative(
+        self,
+        adam_id: int,
+        name: str,
+        creative_type: str,
+        product_page_id: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Create a creative.
+
+        Args:
+            adam_id: App Adam ID
+            name: Creative name
+            creative_type: Type of creative (e.g., CUSTOM_PRODUCT_PAGE)
+            product_page_id: Optional product page ID for custom product page creatives
+
+        Returns:
+            Created creative data or None on failure
+        """
+        try:
+            creative_data: dict[str, Any] = {
+                "adamId": adam_id,
+                "name": name,
+                "type": creative_type,
+            }
+            if product_page_id:
+                creative_data["productPageId"] = product_page_id
+
+            response = self._request("POST", "/creatives", data=creative_data)
+            return response.get("data") if isinstance(response, dict) else None
+        except Exception as e:
+            console.print(f"[red]Error creating creative: {e}[/red]")
+            return None
+
+    def find_creatives(
+        self, conditions: Optional[list[dict[str, Any]]] = None
+    ) -> list[dict[str, Any]]:
+        """Find creatives using selector conditions.
+
+        Args:
+            conditions: Optional selector conditions for filtering
+
+        Returns:
+            List of matching creatives
+        """
+        try:
+            selector: dict[str, Any] = {
+                "pagination": {"offset": 0, "limit": 1000},
+            }
+            if conditions:
+                selector["conditions"] = conditions
+
+            data = {"selector": selector}
+            response = self._request("POST", "/creatives/find", data=data)
+            return response.get("data", []) if isinstance(response, dict) else []
+        except Exception as e:
+            console.print(f"[red]Error finding creatives: {e}[/red]")
+            return []
+
+    # =========================================================================
+    # Product Page Operations
+    # =========================================================================
+
+    def get_product_pages(self, adam_id: int) -> list[dict[str, Any]]:
+        """Get custom product pages for an app.
+
+        Args:
+            adam_id: App Adam ID
+
+        Returns:
+            List of product pages
+        """
+        try:
+            return self._get_all_paginated(f"/apps/{adam_id}/product-pages")
+        except Exception as e:
+            console.print(f"[red]Error fetching product pages: {e}[/red]")
+            return []
+
+    def get_product_page_locales(
+        self, adam_id: int, product_page_id: str
+    ) -> list[dict[str, Any]]:
+        """Get locale details for a product page.
+
+        Args:
+            adam_id: App Adam ID
+            product_page_id: Product page ID
+
+        Returns:
+            List of locale details
+        """
+        try:
+            return self._get_all_paginated(
+                f"/apps/{adam_id}/product-pages/{product_page_id}/locale-details"
+            )
+        except Exception as e:
+            console.print(f"[red]Error fetching product page locales: {e}[/red]")
+            return []
+
+    # =========================================================================
+    # Rejection Reasons & App Assets
+    # =========================================================================
+
+    def find_rejection_reasons(
+        self, conditions: Optional[list[dict[str, Any]]] = None
+    ) -> list[dict[str, Any]]:
+        """Find product page rejection reasons.
+
+        Args:
+            conditions: Optional selector conditions for filtering
+
+        Returns:
+            List of rejection reasons
+        """
+        try:
+            selector: dict[str, Any] = {
+                "pagination": {"offset": 0, "limit": 1000},
+            }
+            if conditions:
+                selector["conditions"] = conditions
+
+            data = {"selector": selector}
+            response = self._request("POST", "/product-page-reasons/find", data=data)
+            return response.get("data", []) if isinstance(response, dict) else []
+        except Exception as e:
+            console.print(f"[red]Error finding rejection reasons: {e}[/red]")
+            return []
+
+    def find_app_assets(
+        self, adam_id: int, conditions: Optional[list[dict[str, Any]]] = None
+    ) -> list[dict[str, Any]]:
+        """Find app assets (screenshots, previews, etc.).
+
+        Args:
+            adam_id: App Adam ID
+            conditions: Optional selector conditions for filtering
+
+        Returns:
+            List of app assets
+        """
+        try:
+            selector: dict[str, Any] = {
+                "pagination": {"offset": 0, "limit": 1000},
+            }
+            if conditions:
+                selector["conditions"] = conditions
+
+            data = {"selector": selector}
+            response = self._request(
+                "POST", f"/apps/{adam_id}/assets/find", data=data
+            )
+            return response.get("data", []) if isinstance(response, dict) else []
+        except Exception as e:
+            console.print(f"[red]Error finding app assets: {e}[/red]")
+            return []
+
+    # =========================================================================
+    # Custom / Impression Share Reports (Async)
+    # =========================================================================
+
+    def create_custom_report(
+        self,
+        name: str,
+        start_time: str,
+        end_time: str,
+        granularity: str = "DAILY",
+        conditions: Optional[list[dict[str, Any]]] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Create a custom (impression share) report (async).
+
+        Max 10 per 24 hours, max 30-day date range.
+
+        Args:
+            name: Report name
+            start_time: Start date (YYYY-MM-DD)
+            end_time: End date (YYYY-MM-DD)
+            granularity: DAILY, WEEKLY, or MONTHLY
+            conditions: Optional selector conditions
+
+        Returns:
+            Report object with id, state (QUEUED), etc., or None on failure
+        """
+        try:
+            body: dict[str, Any] = {
+                "name": name,
+                "startTime": start_time,
+                "endTime": end_time,
+                "granularity": granularity,
+            }
+            if conditions:
+                body["selector"] = {"conditions": conditions}
+
+            response = self._request("POST", "/custom-reports", data=body)
+            return response.get("data") if isinstance(response, dict) else response
+        except Exception as e:
+            console.print(f"[red]Error creating custom report: {e}[/red]")
+            return None
+
+    def get_custom_report(self, report_id: str) -> Optional[dict[str, Any]]:
+        """Get a custom report by ID.
+
+        When state is COMPLETED, the response includes a downloadUri.
+
+        Args:
+            report_id: The custom report ID
+
+        Returns:
+            Report object or None on failure
+        """
+        try:
+            response = self._request("GET", f"/custom-reports/{report_id}")
+            return response.get("data") if isinstance(response, dict) else response
+        except Exception as e:
+            console.print(f"[red]Error fetching custom report {report_id}: {e}[/red]")
+            return None
+
+    def get_all_custom_reports(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Get all custom reports.
+
+        Args:
+            limit: Maximum reports to return (max 50)
+
+        Returns:
+            List of custom report objects
+        """
+        try:
+            params = {"limit": min(limit, 50), "offset": 0}
+            response = self._request("GET", "/custom-reports", params=params)
+            if isinstance(response, dict):
+                return response.get("data", [])
+            return []
+        except Exception as e:
+            console.print(f"[red]Error fetching custom reports: {e}[/red]")
+            return []
+
+    # =========================================================================
+    # Ad-Level Reports
+    # =========================================================================
+
+    def get_ad_report(
+        self,
+        campaign_id: int,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        granularity: str = "DAILY",
+    ) -> list[dict[str, Any]]:
+        """Get ad-level performance report.
+
+        NOTE: orderBy is REQUIRED in the selector for ad reports.
+
+        Args:
+            campaign_id: Campaign ID
+            start_date: Report start date
+            end_date: Report end date
+            granularity: DAILY, WEEKLY, or MONTHLY
+
+        Returns:
+            List of report rows
+        """
+        end = end_date or datetime.now()
+        start = start_date or (end - timedelta(days=30))
+
+        try:
+            report_request = {
+                "startTime": start.strftime("%Y-%m-%d"),
+                "endTime": end.strftime("%Y-%m-%d"),
+                "selector": {
+                    "orderBy": [{"field": "impressions", "sortOrder": "DESCENDING"}],
+                    "pagination": {"offset": 0, "limit": 1000},
+                },
+                "timeZone": "UTC",
+                "returnRecordsWithNoMetrics": False,
+                "returnRowTotals": True,
+            }
+            if granularity != "DAILY":
+                report_request["granularity"] = granularity
+
+            response = self._request(
+                "POST",
+                f"/reports/campaigns/{campaign_id}/ads",
+                data=report_request,
+            )
+            return response.get("data", {}).get("reportingDataResponse", {}).get("row", [])
+        except Exception as e:
+            console.print(f"[red]Error fetching ad report for campaign {campaign_id}: {e}[/red]")
+            return []
+
+    # =========================================================================
+    # Keyword within Ad Group Reports
+    # =========================================================================
+
+    def get_keyword_adgroup_report(
+        self,
+        campaign_id: int,
+        ad_group_id: int,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> list[dict[str, Any]]:
+        """Get keyword performance report within a specific ad group.
+
+        Response includes insights.bidRecommendation.suggestedBidAmount for
+        each keyword row.
+
+        Args:
+            campaign_id: Campaign ID
+            ad_group_id: Ad group ID
+            start_date: Report start date
+            end_date: Report end date
+
+        Returns:
+            List of report rows (with insights containing bid recommendations)
+        """
+        end = end_date or datetime.now()
+        start = start_date or (end - timedelta(days=30))
+
+        try:
+            report_request = {
+                "startTime": start.strftime("%Y-%m-%d"),
+                "endTime": end.strftime("%Y-%m-%d"),
+                "selector": {
+                    "orderBy": [{"field": "impressions", "sortOrder": "DESCENDING"}],
+                    "pagination": {"offset": 0, "limit": 1000},
+                },
+                "timeZone": "UTC",
+                "returnRecordsWithNoMetrics": False,
+                "returnRowTotals": True,
+            }
+
+            response = self._request(
+                "POST",
+                f"/reports/campaigns/{campaign_id}/adgroups/{ad_group_id}/keywords",
+                data=report_request,
+            )
+            return response.get("data", {}).get("reportingDataResponse", {}).get("row", [])
+        except Exception as e:
+            console.print(
+                f"[red]Error fetching keyword report for campaign {campaign_id} "
+                f"ad group {ad_group_id}: {e}[/red]"
+            )
+            return []
+
+    # =========================================================================
+    # Search Term within Ad Group Reports
+    # =========================================================================
+
+    def get_search_terms_adgroup_report(
+        self,
+        campaign_id: int,
+        ad_group_id: int,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> list[dict[str, Any]]:
+        """Get search terms report within a specific ad group.
+
+        NOTE: timeZone must be "ORTZ" for search term reports.
+
+        Args:
+            campaign_id: Campaign ID
+            ad_group_id: Ad group ID
+            start_date: Report start date
+            end_date: Report end date
+
+        Returns:
+            List of search term report rows
+        """
+        end = end_date or datetime.now()
+        start = start_date or (end - timedelta(days=30))
+
+        try:
+            report_request = {
+                "startTime": start.strftime("%Y-%m-%d"),
+                "endTime": end.strftime("%Y-%m-%d"),
+                "selector": {
+                    "orderBy": [{"field": "impressions", "sortOrder": "DESCENDING"}],
+                    "pagination": {"offset": 0, "limit": 1000},
+                },
+                "timeZone": "ORTZ",
+                "returnRecordsWithNoMetrics": False,
+                "returnRowTotals": True,
+            }
+
+            response = self._request(
+                "POST",
+                f"/reports/campaigns/{campaign_id}/adgroups/{ad_group_id}/searchterms",
+                data=report_request,
+            )
+            return response.get("data", {}).get("reportingDataResponse", {}).get("row", [])
+        except Exception as e:
+            console.print(
+                f"[red]Error fetching search terms for campaign {campaign_id} "
+                f"ad group {ad_group_id}: {e}[/red]"
+            )
+            return []

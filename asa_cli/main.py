@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from . import __version__
-from .commands import adgroups, campaigns, config, keywords, optimize, reports
+from .commands import acl, adgroups, ads, budget, campaigns, config, geo, keywords, optimize, reports
 from .config import set_current_app
 
 app = typer.Typer(
@@ -26,6 +26,10 @@ app.add_typer(adgroups.app, name="adgroups", help="Ad group management")
 app.add_typer(keywords.app, name="keywords", help="Keyword management")
 app.add_typer(reports.app, name="reports", help="Reporting and analytics")
 app.add_typer(optimize.app, name="optimize", help="Automated campaign optimization")
+app.add_typer(budget.app, name="budget", help="Budget order management")
+app.add_typer(geo.app, name="geo", help="Geo targeting and location search")
+app.add_typer(ads.app, name="ads", help="Ad variations, creatives, and product pages")
+app.add_typer(acl.app, name="acl", help="Access control, user management, and app search")
 
 
 @app.command("version")
@@ -79,12 +83,47 @@ Apple's recommended 4-campaign structure.
     asa keywords list           - List keywords in a campaign
     asa keywords add            - Add keywords with automatic routing
     asa keywords add-negatives  - Block unwanted search terms
+    asa keywords list-negatives - List all negative keywords
+    asa keywords delete-negatives - Remove negative keywords
+    asa keywords find           - Search keywords across ad groups
+    asa keywords update-bids-bulk - Bulk update keyword bids
     asa keywords promote        - Graduate Discovery keywords to exact
 
   [bold cyan]Reports:[/bold cyan]
     asa reports summary         - Performance summary across campaigns
     asa reports keywords        - Keyword performance report
     asa reports search-terms    - Discover new keywords and negatives
+    asa reports custom          - Create async custom report
+    asa reports custom-list     - List custom reports
+    asa reports custom-get      - Get/download custom report
+    asa reports ads             - Ad-level performance report
+    asa reports bid-recommendations - Keyword bid recommendations
+
+  [bold cyan]Budget:[/bold cyan]
+    asa budget list             - List budget orders
+    asa budget get [ID]         - Get budget order details
+    asa budget status           - Campaign budget health overview
+    asa budget create           - Create a budget order
+
+  [bold cyan]Geo:[/bold cyan]
+    asa geo search              - Search for geo locations
+    asa geo show                - Show campaign geo targeting
+    asa geo set                 - Set campaign geo targeting
+
+  [bold cyan]Ads:[/bold cyan]
+    asa ads list                - List ad variations
+    asa ads create              - Create an ad variation
+    asa ads delete              - Delete an ad variation
+    asa ads creatives           - List creative sets
+    asa ads product-pages       - List product page results
+    asa ads rejections          - View ad rejection reasons
+
+  [bold cyan]ACL:[/bold cyan]
+    asa acl list                - List access control entries
+    asa acl me                  - Show current user info
+    asa acl search-apps         - Search for apps
+    asa acl eligibility         - Check campaign eligibility
+    asa acl countries           - List supported countries
 
   [bold cyan]Optimization:[/bold cyan]
     asa optimize                - Run automated optimization workflow

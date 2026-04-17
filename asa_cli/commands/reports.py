@@ -856,3 +856,514 @@ def report_search_terms(
         keyword_list = ",".join([t["term"] for t in terms[:10]])
         console.print(f'[cyan]asa keywords add-negatives "{keyword_list}" --all[/cyan]')
 
+
+@app.command("custom")
+def report_custom(
+    days: int = typer.Option(30, "--days", "-d", help="Number of days (max 30)"),
+    name: str = typer.Option("Impression Share Report", "--name", "-n", help="Report name"),
+):
+    """Create a custom impression share report, poll until complete, and display results."""
+    import time as _time
+
+    credentials = load_credentials()
+    if not credentials:
+        console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
+        raise typer.Exit(1)
+
+    client = SearchAdsClient(credentials)
+
+    # Cap at 30 days (API max)
+    days = min(days, 30)
+    end = datetime.now()
+    start = end - timedelta(days=days)
+
+    start_str = start.strftime("%Y-%m-%d")
+    end_str = end.strftime("%Y-%m-%d")
+
+    console.print(
+        Panel(
+            f"[bold]Custom Report[/bold]\n{start_str} to {end_str}",
+            expand=False,
+        )
+    )
+
+    with console.status("[bold blue]Creating custom report..."):
+        report = client.create_custom_report(name, start_str, end_str)
+
+    if not report:
+        console.print("[red]Failed to create custom report.[/red]")
+        raise typer.Exit(1)
+
+    report_id = report.get("id")
+    state = report.get("state", "UNKNOWN")
+    console.print(f"Report created: [cyan]{report_id}[/cyan] (state: {state})")
+
+    # Poll until complete (max 5 minutes)
+    max_polls = 30
+    poll_count = 0
+
+    with console.status("[bold blue]Waiting for report to complete...") as status:
+        while state not in ("COMPLETED", "FAILED") and poll_count < max_polls:
+            _time.sleep(10)
+            poll_count += 1
+            status.update(f"[bold blue]Polling report status... ({poll_count}/{max_polls})")
+            report = client.get_custom_report(report_id)
+            if not report:
+                console.print("[red]Failed to fetch report status.[/red]")
+                raise typer.Exit(1)
+            state = report.get("state", "UNKNOWN")
+
+    if state == "FAILED":
+        console.print("[red]Report generation failed.[/red]")
+        raise typer.Exit(1)
+
+    if state != "COMPLETED":
+        console.print(f"[yellow]Report still processing after {max_polls * 10}s (state: {state}).[/yellow]")
+        console.print(f"Check later with: [cyan]asa reports custom-get {report_id}[/cyan]")
+        return
+
+    download_uri = report.get("downloadUri")
+    if download_uri:
+        console.print(f"[green]Report complete![/green] Download: {download_uri}")
+    else:
+        console.print("[green]Report complete![/green]")
+
+    # Display available report data
+    table = Table(title="Custom Report Results", show_header=True, header_style="bold magenta")
+    table.add_column("Field")
+    table.add_column("Value")
+
+    for key, value in report.items():
+        if key != "downloadUri":
+            table.add_row(str(key), str(value)[:80])
+
+    console.print(table)
+
+
+@app.command("custom-list")
+def report_custom_list():
+    """List all custom reports."""
+    credentials = load_credentials()
+    if not credentials:
+        console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
+        raise typer.Exit(1)
+
+    client = SearchAdsClient(credentials)
+
+    with console.status("[bold blue]Fetching custom reports..."):
+        reports = client.get_all_custom_reports()
+
+    if not reports:
+        console.print("[yellow]No custom reports found.[/yellow]")
+        return
+
+    table = Table(title="Custom Reports", show_header=True, header_style="bold magenta")
+    table.add_column("ID")
+    table.add_column("Name")
+    table.add_column("State")
+    table.add_column("Start")
+    table.add_column("End")
+    table.add_column("Granularity")
+
+    for report in reports:
+        state = report.get("state", "?")
+        state_style = (
+            "green" if state == "COMPLETED"
+            else "yellow" if state == "QUEUED"
+            else "blue" if state == "RUNNING"
+            else "red"
+        )
+
+        table.add_row(
+            str(report.get("id", "?")),
+            report.get("name", "?")[:30],
+            f"[{state_style}]{state}[/{state_style}]",
+            report.get("startTime", "?")[:10],
+            report.get("endTime", "?")[:10],
+            report.get("granularity", "?"),
+        )
+
+    console.print(table)
+
+
+@app.command("custom-get")
+def report_custom_get(
+    report_id: str = typer.Argument(..., help="Custom report ID"),
+):
+    """Get a specific custom report status and results."""
+    credentials = load_credentials()
+    if not credentials:
+        console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
+        raise typer.Exit(1)
+
+    client = SearchAdsClient(credentials)
+
+    with console.status("[bold blue]Fetching custom report..."):
+        report = client.get_custom_report(report_id)
+
+    if not report:
+        console.print(f"[red]Custom report {report_id} not found.[/red]")
+        raise typer.Exit(1)
+
+    state = report.get("state", "UNKNOWN")
+    state_style = (
+        "green" if state == "COMPLETED"
+        else "yellow" if state == "QUEUED"
+        else "blue" if state == "RUNNING"
+        else "red"
+    )
+
+    console.print(Panel(
+        f"[bold]Custom Report: {report.get('name', '?')}[/bold]\n"
+        f"State: [{state_style}]{state}[/{state_style}]",
+        expand=False,
+    ))
+
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Field")
+    table.add_column("Value")
+
+    for key, value in report.items():
+        table.add_row(str(key), str(value)[:100])
+
+    console.print(table)
+
+    if state == "COMPLETED" and report.get("downloadUri"):
+        console.print(f"\n[green]Download URI:[/green] {report['downloadUri']}")
+
+
+@app.command("ads")
+def report_ads(
+    campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
+    days: int = typer.Option(14, "--days", "-d", help="Number of days"),
+    all_campaigns: bool = typer.Option(False, "--all", "-a", help="Show ad report for all campaigns"),
+):
+    """Show ad-level performance report."""
+    credentials = load_credentials()
+    if not credentials:
+        console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
+        raise typer.Exit(1)
+
+    client = SearchAdsClient(credentials)
+
+    end = datetime.now()
+    start = end - timedelta(days=days)
+
+    # Get campaigns to report on
+    campaigns_to_report = []
+    app_name = _resolve_app_name()
+
+    def _filter_by_app(campaigns: list) -> list:
+        if app_name:
+            return [c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)]
+        return campaigns
+
+    if all_campaigns:
+        campaigns = _filter_by_app(client.get_campaigns())
+        campaigns_to_report = campaigns
+    elif campaign_id:
+        campaign = client.get_campaign(campaign_id)
+        if campaign:
+            campaigns_to_report = [campaign]
+        else:
+            console.print(f"[red]Campaign {campaign_id} not found.[/red]")
+            raise typer.Exit(1)
+    else:
+        # Interactive selection
+        campaigns = _filter_by_app(client.get_campaigns())
+        if not campaigns:
+            console.print("[yellow]No campaigns found.[/yellow]")
+            return
+
+        table = Table(show_header=True)
+        table.add_column("#", style="cyan")
+        table.add_column("Type")
+        table.add_column("Name")
+
+        for idx, c in enumerate(campaigns, 1):
+            ctype = get_campaign_type_label(c.get("name", ""), app_name=app_name)
+            table.add_row(str(idx), ctype, c.get("name", "")[:50])
+
+        console.print(table)
+
+        from rich.prompt import Prompt
+
+        choice = Prompt.ask("Select campaign number (or 'all')")
+        if choice.lower() == "all":
+            campaigns_to_report = campaigns
+        elif choice.isdigit() and 1 <= int(choice) <= len(campaigns):
+            campaigns_to_report = [campaigns[int(choice) - 1]]
+        else:
+            console.print("[red]Invalid selection.[/red]")
+            return
+
+    console.print(
+        Panel(
+            f"[bold]Ad Performance Report[/bold]\nLast {days} days",
+            expand=False,
+        )
+    )
+
+    for campaign in campaigns_to_report:
+        cid = campaign.get("id")
+        cname = campaign.get("name", "Unknown")
+        ctype = get_campaign_type_label(cname, app_name=_resolve_app_name())
+
+        with console.status(f"[bold blue]Fetching {cname} ad report..."):
+            report_data = client.get_ad_report(cid, start, end)
+
+        if not report_data:
+            console.print(f"[yellow]{ctype}: No ad data[/yellow]")
+            continue
+
+        table = Table(title=f"{ctype} - Ads", show_header=True, header_style="bold magenta")
+        table.add_column("Ad Name")
+        table.add_column("Status")
+        table.add_column("Impr", justify="right")
+        table.add_column("Taps", justify="right")
+        table.add_column("TTR", justify="right")
+        table.add_column("Inst", justify="right")
+        table.add_column("CVR", justify="right")
+        table.add_column("Spend", justify="right")
+        table.add_column("CPA", justify="right")
+
+        for row in report_data:
+            metadata = row.get("metadata", {})
+            metrics = row.get("total", {})
+
+            ad_name = metadata.get("adName", "Unknown")
+            ad_status = metadata.get("adStatus", "?")
+
+            impressions = metrics.get("impressions", 0)
+            taps = metrics.get("taps", 0)
+            installs = metrics.get("totalInstalls", 0) or metrics.get("tapInstalls", 0)
+            spend_data = metrics.get("localSpend", {})
+            spend = float(spend_data.get("amount", 0)) if spend_data else 0
+
+            ttr = (taps / impressions * 100) if impressions > 0 else 0
+            cvr = (installs / taps * 100) if taps > 0 else 0
+            cpa = (spend / installs) if installs > 0 else 0
+
+            status_style = "green" if ad_status == "ENABLED" else "yellow" if ad_status == "PAUSED" else "dim"
+
+            table.add_row(
+                ad_name[:30],
+                f"[{status_style}]{ad_status}[/{status_style}]",
+                format_number(impressions),
+                format_number(taps),
+                f"{ttr:.1f}%",
+                format_number(installs),
+                f"{cvr:.1f}%",
+                format_currency(spend),
+                format_currency(cpa) if installs > 0 else "-",
+            )
+
+        console.print(table)
+        console.print()
+
+
+@app.command("bid-recommendations")
+def report_bid_recommendations(
+    campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Campaign ID"),
+    days: int = typer.Option(14, "--days", "-d", help="Number of days"),
+    all_campaigns: bool = typer.Option(False, "--all", "-a", help="Show bids for all campaigns"),
+):
+    """Show Apple's suggested bid amounts vs current bids for keywords.
+
+    For each campaign and ad group, fetches the keyword report with bid
+    recommendation insights. Displays a color-coded table showing where
+    your bids are below Apple's suggestions.
+    """
+    credentials = load_credentials()
+    if not credentials:
+        console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
+        raise typer.Exit(1)
+
+    client = SearchAdsClient(credentials)
+
+    end = datetime.now()
+    start = end - timedelta(days=days)
+
+    # Get campaigns to report on
+    campaigns_to_report = []
+    app_name = _resolve_app_name()
+
+    def _filter_by_app(campaigns: list) -> list:
+        if app_name:
+            return [c for c in campaigns if parse_campaign_name(c.get("name", ""), app_name=app_name)]
+        return campaigns
+
+    if all_campaigns:
+        campaigns = _filter_by_app(client.get_campaigns())
+        campaigns_to_report = campaigns
+    elif campaign_id:
+        campaign = client.get_campaign(campaign_id)
+        if campaign:
+            campaigns_to_report = [campaign]
+        else:
+            console.print(f"[red]Campaign {campaign_id} not found.[/red]")
+            raise typer.Exit(1)
+    else:
+        # Interactive selection
+        campaigns = _filter_by_app(client.get_campaigns())
+        if not campaigns:
+            console.print("[yellow]No campaigns found.[/yellow]")
+            return
+
+        table = Table(show_header=True)
+        table.add_column("#", style="cyan")
+        table.add_column("Type")
+        table.add_column("Name")
+
+        for idx, c in enumerate(campaigns, 1):
+            ctype = get_campaign_type_label(c.get("name", ""), app_name=app_name)
+            table.add_row(str(idx), ctype, c.get("name", "")[:50])
+
+        console.print(table)
+
+        from rich.prompt import Prompt
+
+        choice = Prompt.ask("Select campaign number (or 'all')")
+        if choice.lower() == "all":
+            campaigns_to_report = campaigns
+        elif choice.isdigit() and 1 <= int(choice) <= len(campaigns):
+            campaigns_to_report = [campaigns[int(choice) - 1]]
+        else:
+            console.print("[red]Invalid selection.[/red]")
+            return
+
+    console.print(
+        Panel(
+            f"[bold]Bid Recommendations[/bold]\nLast {days} days",
+            expand=False,
+        )
+    )
+
+    total_keywords = 0
+    below_suggestion = 0
+
+    for campaign in campaigns_to_report:
+        cid = campaign.get("id")
+        cname = campaign.get("name", "Unknown")
+        ctype = get_campaign_type_label(cname, app_name=_resolve_app_name())
+
+        # Get ad groups for this campaign
+        with console.status(f"[bold blue]Fetching ad groups for {cname}..."):
+            ad_groups = client.get_ad_groups(cid)
+
+        if not ad_groups:
+            console.print(f"[yellow]{ctype}: No ad groups found[/yellow]")
+            continue
+
+        for ag in ad_groups:
+            ag_id = ag.get("id")
+            ag_name = ag.get("name", "Unknown")
+
+            with console.status(f"[bold blue]Fetching keyword report for {cname} / {ag_name}..."):
+                report_data = client.get_keyword_adgroup_report(cid, ag_id, start, end)
+
+            if not report_data:
+                continue
+
+            # Build keyword rows with bid recommendations
+            rows = []
+            for row in report_data:
+                metadata = row.get("metadata", {})
+                insights = row.get("insights", {})
+                metrics = row.get("total", {})
+
+                keyword = metadata.get("keyword", "?")
+                keyword_id = metadata.get("keywordId")
+
+                # Current bid from metadata
+                bid_data = metadata.get("bidAmount", {})
+                current_bid = float(bid_data.get("amount", 0)) if bid_data else 0
+
+                # Suggested bid from insights
+                bid_rec = insights.get("bidRecommendation", {})
+                suggested_data = bid_rec.get("suggestedBidAmount", {})
+                suggested_bid = float(suggested_data.get("amount", 0)) if suggested_data else 0
+
+                impressions = metrics.get("impressions", 0)
+                taps = metrics.get("taps", 0)
+                installs = metrics.get("totalInstalls", 0) or metrics.get("tapInstalls", 0)
+
+                rows.append({
+                    "keyword": keyword,
+                    "keyword_id": keyword_id,
+                    "current_bid": current_bid,
+                    "suggested_bid": suggested_bid,
+                    "difference": suggested_bid - current_bid,
+                    "impressions": impressions,
+                    "taps": taps,
+                    "installs": installs,
+                })
+
+            if not rows:
+                continue
+
+            # Sort by difference (biggest gap first)
+            rows.sort(key=lambda x: -x["difference"])
+
+            table = Table(
+                title=f"{ctype} / {ag_name} - Bid Recommendations",
+                show_header=True,
+                header_style="bold magenta",
+            )
+            table.add_column("Keyword")
+            table.add_column("Current Bid", justify="right")
+            table.add_column("Suggested Bid", justify="right")
+            table.add_column("Difference", justify="right")
+            table.add_column("Impr", justify="right")
+            table.add_column("Taps", justify="right")
+            table.add_column("Inst", justify="right")
+
+            for r in rows:
+                total_keywords += 1
+                diff = r["difference"]
+
+                # Color code: green if current >= suggested, red if significantly below
+                if diff <= 0:
+                    bid_style = "green"
+                elif diff < 0.50:
+                    bid_style = "yellow"
+                    below_suggestion += 1
+                else:
+                    bid_style = "red"
+                    below_suggestion += 1
+
+                diff_str = f"[{bid_style}]{'+' if diff <= 0 else ''}{format_currency(abs(diff))}[/{bid_style}]"
+                if diff > 0:
+                    diff_str = f"[{bid_style}]-{format_currency(diff)}[/{bid_style}]"
+
+                current_str = format_currency(r["current_bid"]) if r["current_bid"] > 0 else "-"
+                suggested_str = format_currency(r["suggested_bid"]) if r["suggested_bid"] > 0 else "-"
+
+                table.add_row(
+                    r["keyword"][:30],
+                    current_str,
+                    suggested_str,
+                    diff_str,
+                    format_number(r["impressions"]),
+                    format_number(r["taps"]),
+                    format_number(r["installs"]),
+                )
+
+            console.print(table)
+            console.print()
+
+    # Summary
+    if total_keywords > 0:
+        console.print(
+            Panel(
+                f"[bold]Summary[/bold]\n"
+                f"Total keywords: {total_keywords}\n"
+                f"Below suggestion: [{'red' if below_suggestion > 0 else 'green'}]"
+                f"{below_suggestion}[/{'red' if below_suggestion > 0 else 'green'}]\n"
+                f"At or above: [green]{total_keywords - below_suggestion}[/green]",
+                expand=False,
+            )
+        )
+    else:
+        console.print("[yellow]No keyword bid data found.[/yellow]")
+

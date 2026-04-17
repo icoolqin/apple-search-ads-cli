@@ -13,12 +13,21 @@ Full management of Apple Search Ads campaigns for iOS apps using the ASA CLI too
 This skill enables you to:
 - Set up Apple's recommended 4-campaign structure
 - Add keywords with automatic routing (exact → target, broad → discovery, negative → discovery)
-- Block irrelevant search terms with negative keywords
+- Full negative keyword CRUD (list, add, delete at campaign and ad group level)
+- Bulk keyword bid updates across entire campaigns
+- Search/find keywords across all ad groups
 - Promote winning keywords from Discovery to exact match campaigns
-- Generate performance reports (campaign, keyword, search term level)
+- Generate performance reports (campaign, keyword, ad group, search term, impression share, ad-level)
+- Create and manage async custom reports for large date ranges
+- View bid recommendations from Apple's keyword insights
+- Manage budget orders and monitor campaign budget health
+- Search and set geo targeting (countries, regions, cities)
+- Manage ad variations, creative sets, and product pages
+- View ad rejection reasons
+- Access control management (ACLs, user info, app search, eligibility)
 - Audit campaign structure against Apple's best practices
 - Pause/enable campaigns
-- **Automated optimization** - analyze search terms and batch promote/block keywords
+- **Automated optimization** — analyze search terms and batch promote/block keywords
 
 ## Prerequisites
 
@@ -121,6 +130,11 @@ asa config test
 | `asa keywords add "<kw1>,<kw2>" --type competitor` | Add competitor keywords |
 | `asa keywords add-negatives "<kw1>,<kw2>" --all` | Block terms in all campaigns |
 | `asa keywords add-negatives "<kw1>,<kw2>" --all --force` | Block terms without confirmation |
+| `asa keywords list-negatives` | List all campaign and ad-group level negatives |
+| `asa keywords list-negatives --campaign <ID>` | List negatives for specific campaign |
+| `asa keywords delete-negatives <IDS>` | Delete negative keywords by comma-separated IDs |
+| `asa keywords find "<query>"` | Search targeting keywords across all ad groups |
+| `asa keywords update-bids-bulk --bid <AMOUNT>` | Bulk update all keyword bids in a campaign |
 | `asa keywords promote "<kw1>,<kw2>" --target category` | Graduate from Discovery |
 | `asa keywords delete` | Delete keywords (interactive) |
 | `asa keywords delete --ids "123,456" --force` | Delete specific keywords by ID |
@@ -129,6 +143,7 @@ asa config test
 | `asa keywords pause --all` | Pause all active keywords in ad group |
 | `asa keywords enable` | Enable a paused keyword |
 | `asa keywords enable --all` | Enable all paused keywords in ad group |
+| `asa keywords research` | Keyword research (stub — requires external tools) |
 
 ### Report Commands
 
@@ -145,6 +160,50 @@ asa config test
 | `asa reports search-terms` | All search terms |
 | `asa reports search-terms --winners` | Terms to promote (good CPA) |
 | `asa reports search-terms --negatives` | Terms to block (spend, no installs) |
+| `asa reports custom --days 90` | Create async custom report |
+| `asa reports custom --days 90 --granularity WEEKLY` | Custom report with weekly granularity |
+| `asa reports custom-list` | List all custom reports (pending/completed) |
+| `asa reports custom-get <ID>` | Get or download a custom report by ID |
+| `asa reports ads` | Ad-level performance report |
+| `asa reports bid-recommendations` | Show keyword bid recommendations from Apple insights |
+
+### Budget Commands
+
+| Command | Description |
+|---------|-------------|
+| `asa budget list` | List all budget orders |
+| `asa budget get <ID>` | Get budget order details |
+| `asa budget status` | Campaign budget health overview (color-coded) |
+| `asa budget create` | Create a new budget order |
+
+### Geo Targeting Commands
+
+| Command | Description |
+|---------|-------------|
+| `asa geo search "<query>"` | Search for geo locations (countries, regions, cities) |
+| `asa geo show` | Show geo targeting for all campaigns |
+| `asa geo set --campaign <ID> --countries US,CA` | Set country targeting for a campaign |
+
+### Ads & Creatives Commands
+
+| Command | Description |
+|---------|-------------|
+| `asa ads list --campaign <ID>` | List ad variations |
+| `asa ads create --campaign <ID> --ad-group <ID>` | Create an ad variation |
+| `asa ads delete <AD_ID> --campaign <ID> --ad-group <ID>` | Delete an ad variation |
+| `asa ads creatives --campaign <ID> --ad-group <ID>` | List creative sets |
+| `asa ads product-pages` | List product page results |
+| `asa ads rejections` | View ad rejection reasons |
+
+### ACL & App Search Commands
+
+| Command | Description |
+|---------|-------------|
+| `asa acl list` | List access control entries |
+| `asa acl me` | Show current user info |
+| `asa acl search-apps "<query>"` | Search for apps eligible for ads |
+| `asa acl eligibility <APP_ID>` | Check campaign eligibility for an app |
+| `asa acl countries` | List supported countries/regions |
 
 ### Optimization Commands
 
@@ -323,35 +382,43 @@ auto clicker, signal app, testflight, crypto trading, forex trading, stock tradi
 
 ## API Coverage
 
-The CLI covers these Apple Search Ads API operations:
+Full Apple Search Ads Campaign Management API v5 coverage — 72 API methods across 15 categories:
 
 | Category | Operations |
 |----------|------------|
 | **Campaigns** | list, get, create, update, pause, enable, delete |
 | **Ad Groups** | list, create, update, pause, enable, delete |
-| **Keywords** | list, add, add negatives, delete, update bid, pause, enable |
-| **Reports** | campaign, keyword, search terms |
-
-**Not yet implemented** (advanced features):
-- Creative sets
-- Geo-targeting beyond country level
-- Budget orders
+| **Targeting Keywords** | list, add, find, delete, update bid, bulk update bids, pause, enable |
+| **Campaign Negatives** | list, find, add, update, delete |
+| **Ad Group Negatives** | list, find, add, update, delete |
+| **Reports** | campaign, keyword, ad group, search terms, impression share |
+| **Custom Reports** | create (async), get, list |
+| **Ad-Level Reports** | campaign ads, keyword by ad group, search terms by ad group |
+| **Budget Orders** | list, get, create |
+| **Geo Targeting** | search locations, get geo data, get/set campaign targeting |
+| **Ads / Variations** | list, create, delete |
+| **Creatives** | list creative sets, product page results, rejection reasons |
+| **ACL / Users** | list ACLs, current user info |
+| **App Search** | search apps, campaign eligibility, supported countries |
+| **Optimization** | automated promote/block workflow with configurable thresholds |
 
 ---
 
 ## API Notes
 
-**Bulk Operations**: The CLI uses Apple's bulk API endpoints for keyword operations (enable, pause, delete, update bid). These are more efficient than individual requests.
+**Bulk Operations**: The CLI uses Apple's bulk API endpoints for keyword operations (enable, pause, delete, update bid, bulk bid updates). More efficient than individual requests.
 
-**Caching**: Apple's API may show stale data after delete operations. If keywords still appear in listings after deletion, the delete was successful but the cache hasn't refreshed. Attempting to modify deleted keywords will return "keyword deleted" errors.
+**Custom Reports**: Async reports support up to 90-day date ranges. The CLI automatically polls for completion (10s intervals, 5 min timeout) with a spinner.
 
-**Search Terms Reports**: Search term reports require campaigns to have accumulated sufficient data (typically a few days of activity). New campaigns may return empty results.
+**Bid Recommendations**: Extracted from the `insights.bidRecommendation.suggestedBidAmount` field in keyword reports. Color-coded: green (at/above), yellow (slightly below), red (significantly below).
 
-**Error Handling**: Keyword add operations (`add_keywords`, `add_negative_keywords`) return both successful additions and any errors (e.g., duplicate keywords). The CLI displays both:
-- Successfully added keywords are shown in green
-- Duplicates or other errors are shown with details but don't fail the overall operation
+**Caching**: Apple's API may show stale data after delete operations. If keywords still appear in listings after deletion, the delete was successful but the cache hasn't refreshed.
+
+**Error Handling**: Keyword add operations return both successful additions and any errors (e.g., duplicates). The CLI displays both — duplicates don't fail the overall operation.
 
 **Authentication Retry**: The CLI automatically retries requests (up to 2 times) when authentication tokens expire, refreshing the token transparently.
+
+**ACL Endpoints**: Access control and app search endpoints don't use the org context header. The CLI handles this automatically.
 
 ---
 

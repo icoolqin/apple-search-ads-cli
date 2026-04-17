@@ -20,7 +20,12 @@ $ asa keywords add "photo editor,image filter" --type category
 - **🎯 4-Campaign Structure** — Implements Apple's best practices with Brand, Category, Competitor, and Discovery campaigns
 - **🔀 Smart Keyword Routing** — Add keywords once; they're automatically distributed to the right campaigns with the right match types
 - **📈 Automated Optimization** — One command analyzes Discovery, promotes winners, and blocks losers
-- **📊 Rich Reporting** — Performance summaries, keyword reports, search term analysis, and impression share
+- **📊 Rich Reporting** — Performance summaries, keyword reports, search term analysis, impression share, ad-level reports, bid recommendations, and async custom reports
+- **💰 Budget Management** — Monitor budget orders, check campaign budget health with color-coded status
+- **🌍 Geo Targeting** — Search locations, view and set campaign geo targeting by country/region
+- **🎨 Ad Management** — List, create, and delete ad variations; manage creatives and product pages; view rejection reasons
+- **🔐 Access Control** — List ACLs, check user info, search apps, verify eligibility, list supported countries
+- **📦 Bulk Operations** — Bulk keyword bid updates, bulk negative keyword management, cross-campaign keyword search
 - **🔒 Dry-Run Mode** — Preview every change before it happens
 - **🤖 Claude Code Integration** — Includes SKILL.md for AI-assisted campaign management
 
@@ -106,6 +111,16 @@ asa keywords promote "best photo app" --target category
 # List and filter keywords
 asa keywords list --campaign 12345
 asa keywords list --filter "photo" --status ACTIVE
+
+# Negative keyword management
+asa keywords list-negatives                    # List all negatives
+asa keywords delete-negatives 123,456          # Remove negatives by ID
+
+# Search across campaigns
+asa keywords find "photo"                      # Find keywords matching text
+
+# Bulk bid updates
+asa keywords update-bids-bulk --bid 2.50       # Update all bids at once
 ```
 
 ### Reporting
@@ -123,6 +138,83 @@ asa reports search-terms --negatives  # Terms to block
 
 # Impression share / Share of Voice
 asa reports impression-share --all
+
+# Ad-level performance
+asa reports ads
+
+# Bid recommendations (from Apple's keyword insights)
+asa reports bid-recommendations
+
+# Async custom reports (large date ranges)
+asa reports custom --days 90 --granularity WEEKLY
+asa reports custom-list                        # List pending/completed reports
+asa reports custom-get <ID>                    # Download specific report
+```
+
+### Budget Management
+
+```bash
+# List budget orders
+asa budget list
+
+# Campaign budget health (color-coded)
+asa budget status
+
+# Get budget order details
+asa budget get <ID>
+
+# Create a budget order
+asa budget create --name "Q1 2025" --amount 5000 --start 2025-01-01 --end 2025-03-31
+```
+
+### Geo Targeting
+
+```bash
+# Search for geo locations
+asa geo search "California"
+
+# Show campaign geo targeting
+asa geo show
+
+# Set geo targeting
+asa geo set --campaign <ID> --countries US,CA,GB
+```
+
+### Ads & Creatives
+
+```bash
+# List ad variations
+asa ads list --campaign <ID>
+
+# Create/delete ad variations
+asa ads create --campaign <ID> --ad-group <ID>
+asa ads delete <AD_ID> --campaign <ID> --ad-group <ID>
+
+# View creative sets and product pages
+asa ads creatives --campaign <ID> --ad-group <ID>
+asa ads product-pages
+
+# Check ad rejection reasons
+asa ads rejections
+```
+
+### Access Control
+
+```bash
+# List access control entries
+asa acl list
+
+# Current user info
+asa acl me
+
+# Search for apps eligible for ads
+asa acl search-apps "My App"
+
+# Check campaign eligibility
+asa acl eligibility <APP_ID>
+
+# List supported countries
+asa acl countries
 ```
 
 ### Automated Optimization
@@ -206,6 +298,28 @@ Configuration is stored in `~/.asa-cli/`:
 | **Pagination** | Automatically handles large result sets (>1000 items) |
 | **Rate Limiting** | Respects Apple's API limits |
 
+## 📡 API Coverage
+
+Full Apple Search Ads Campaign Management API v5 coverage — 72 API methods across 15 categories:
+
+| Category | Operations |
+|----------|------------|
+| **Campaigns** | list, get, create, update, pause, enable, delete |
+| **Ad Groups** | list, create, update, pause, enable, delete |
+| **Targeting Keywords** | list, add, find, delete, update bid, bulk update bids, pause, enable |
+| **Campaign Negatives** | list, find, add, update, delete |
+| **Ad Group Negatives** | list, find, add, update, delete |
+| **Reports** | campaign, keyword, ad group, search terms, impression share |
+| **Custom Reports** | create (async), get, list |
+| **Ad-Level Reports** | campaign ads, keyword by ad group, search terms by ad group |
+| **Budget Orders** | list, get, create |
+| **Geo Targeting** | search locations, get geo data, get/set campaign targeting |
+| **Ads / Variations** | list, create, delete |
+| **Creatives** | list creative sets, product page results, rejection reasons |
+| **ACL / Users** | list ACLs, current user info |
+| **App Search** | search apps, campaign eligibility, supported countries |
+| **Optimization** | automated promote/block workflow with configurable thresholds |
+
 ## 🤖 Claude Code Integration
 
 This CLI includes a `SKILL.md` file for use with [Claude Code](https://claude.ai/code). When loaded, Claude can manage your Apple Search Ads campaigns conversationally:
@@ -220,6 +334,7 @@ Claude: [Runs asa keywords add "photo editor,image filter,picture effects" --typ
 - [Apple Search Ads Best Practices](https://ads.apple.com/app-store/best-practices/campaign-structure)
 - [Apple Ads API Documentation](https://developer.apple.com/documentation/apple_ads)
 - [SKILL.md](SKILL.md) — Full command reference for Claude Code
+- [API Completion Plan](docs/API-COMPLETION-PLAN.md) — Implementation roadmap
 
 ## 🤝 Contributing
 
