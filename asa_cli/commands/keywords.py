@@ -906,3 +906,100 @@ def enable_keyword_cmd(
             console.print(f"[green]Keyword {keyword_id} enabled.[/green]")
         else:
             console.print(f"[red]Failed to enable keyword {keyword_id}.[/red]")
+
+
+@app.command()
+def research(
+    seed: Optional[str] = typer.Option(
+        None, "--seed", "-s",
+        help="Comma-separated seed keywords for recommendations"
+    ),
+    limit: int = typer.Option(
+        50, "--limit", "-l",
+        help="Max results to show"
+    ),
+    raw: bool = typer.Option(
+        False, "--raw",
+        help="Show raw API response for debugging"
+    ),
+):
+    """Research keywords — get Apple's recommendations and search popularity scores.
+
+    Uses ASA API targeting keyword recommendations endpoint to find new keywords
+    and get bid recommendations for existing ones.
+    """
+    config = get_current_app_config()
+    creds = load_credentials()
+    client = SearchAdsClient(credentials=creds, app_config=config)
+
+    app_name = _resolve_app_name()
+
+    # Find a campaign and ad group to use as context
+    with console.status("[bold blue]Finding campaigns..."):
+        campaigns = client.get_campaigns()
+
+    # Prefer Category campaign for recommendations
+    target_campaign = None
+    for c in campaigns:
+        ctype = detect_campaign_type(c.get("name", ""), app_name=app_name)
+        if ctype == CampaignType.CATEGORY:
+            target_campaign = c
+            break
+
+    if not target_campaign:
+        # Fall back to any campaign for this app
+        for c in campaigns:
+            ctype = detect_campaign_type(c.get("name", ""), app_name=app_name)
+            if ctype is not None:
+                target_campaign = c
+                break
+
+    if not target_campaign:
+        console.print("[red]No campaigns found for this app.[/red]")
+        return
+
+    campaign_id = target_campaign["id"]
+
+    # Get ad groups
+    with console.status("[bold blue]Finding ad groups..."):
+        ad_groups = client.get_ad_groups(campaign_id)
+
+    if not ad_groups:
+        console.print("[red]No ad groups found.[/red]")
+        return
+
+    ad_group_id = ad_groups[0]["id"]
+
+    with console.status("[bold blue]Fetching keyword recommendations from Apple..."):
+        recommendations = client.get_keyword_recommendations(
+            app_id=config.app_id,
+            campaign_id=campaign_id,
+            ad_group_id=ad_group_id,
+            keywords=[k.strip() for k in seed.split(",")] if seed else None,
+        )
+
+    if raw:
+        import json
+        console.print(json.dumps(recommendations, indent=2, default=str))
+        return
+
+    if not recommendations:
+        console.print("[yellow]No recommendations returned.[/yellow]")
+        return
+
+    table = Table(title=f"Keyword Recommendations for {config.app_name}")
+    table.add_column("Keyword", style="bold")
+    table.add_column("Bid Suggestion", justify="right")
+    table.add_column("Popularity", justify="center")
+
+    shown = 0
+    for item in recommendations[:limit]:
+        keyword = item.get("keyword") or item.get("text") or item.get("id", "?")
+        bid = item.get("bidAmount", {})
+        bid_str = f"${bid.get('amount', '-')}" if isinstance(bid, dict) else str(bid) if bid else "-"
+        popularity = item.get("searchPopularity", item.get("popularity", "-"))
+        table.add_row(str(keyword), bid_str, str(popularity))
+        shown += 1
+
+    console.print(table)
+    console.print(f"\n[dim]Showing {shown} of {len(recommendations)} results[/dim]")

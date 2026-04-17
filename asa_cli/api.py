@@ -774,3 +774,26 @@ class SearchAdsClient:
         except Exception as e:
             console.print(f"[red]Error fetching impression share report: {e}[/red]")
             return []
+
+    def get_keyword_recommendations(
+        self,
+        app_id: str,
+        campaign_id: int | None = None,
+        ad_group_id: int | None = None,
+        keywords: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get keyword recommendations with search popularity scores.
+
+        Note: Apple's keyword recommendation endpoints may not be available
+        in all API versions. The ASA web UI (searchads.apple.com) shows
+        recommendations and search popularity that aren't exposed via API.
+        """
+        # TODO: Apple's recommendation endpoints return 404 on API v5.
+        # The web dashboard at searchads.apple.com still shows recommendations.
+        # This may require a different API version or undocumented endpoint.
+        console.print(
+            "[yellow]Keyword recommendations are not available via the ASA API v5.[/yellow]\n"
+            "[yellow]Use the ASA web dashboard at searchads.apple.com for keyword suggestions[/yellow]\n"
+            "[yellow]and search popularity scores, or use a third-party ASO tool.[/yellow]"
+        )
+        return []
