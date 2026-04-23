@@ -583,6 +583,80 @@ def update_campaign(
         raise typer.Exit(1)
 
 
+@app.command("clone")
+def clone_campaign(
+    source_campaign_id: int = typer.Argument(..., help="Campaign ID to duplicate"),
+    new_name: Optional[str] = typer.Option(None, "--name", "-n",
+        help="Name for the clone (defaults to '<source> v2')"),
+    keep_lifetime: bool = typer.Option(False, "--keep-lifetime",
+        help="Copy the source's lifetime budget too. Default: drop it, since Apple is discontinuing lifetime budgets on 2026-06-16 and the most common reason to clone is to escape a stuck TOTAL_BUDGET_EXHAUSTED state."),
+    pause_source: bool = typer.Option(False, "--pause-source",
+        help="Pause the source campaign after a successful clone."),
+):
+    """Duplicate a campaign (with ad groups, keywords, and negatives).
+
+    Apple Search Ads has no native campaign-duplication endpoint, so
+    this reads the source and re-creates it. Useful to escape a stuck
+    TOTAL_BUDGET_EXHAUSTED state after clearing a lifetime budget —
+    Apple caches that flag even after the cap is gone, and only a fresh
+    campaign ID releases it.
+
+    The clone preserves: daily budget, countries, supply/channel,
+    billing event, ad-group structure (name, default bid, pricing
+    model, targeting dimensions), ACTIVE keywords + bids, and
+    campaign-level negatives.
+
+    Keywords that are PAUSED on the source are NOT copied (usually
+    intentional). Ad-group-level negatives are NOT copied in this pass
+    (campaign-level negatives are).
+    """
+    credentials = load_credentials()
+    if not credentials:
+        console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
+        raise typer.Exit(1)
+
+    client = SearchAdsClient(credentials)
+    console.print(f"[cyan]Cloning campaign {source_campaign_id}...[/cyan]")
+    with console.status("[bold blue]Reading source + creating clone..."):
+        result = client.clone_campaign(
+            source_campaign_id,
+            new_name=new_name,
+            drop_lifetime_budget=not keep_lifetime,
+            pause_source=pause_source,
+        )
+
+    if not result:
+        console.print("[red]Clone failed — no result returned.[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"\n[green]✓ Created campaign id={result['new_id']}[/green] name=[cyan]{result['new_name']}[/cyan]")
+    total_kw = 0
+    total_attempted = 0
+    for ag in result["ad_groups"]:
+        console.print(
+            f"  Ad group [cyan]{ag['name']}[/cyan] (id={ag['new_id']}): "
+            f"{ag['keywords_copied']}/{ag['keywords_attempted']} keywords"
+        )
+        total_kw += ag["keywords_copied"]
+        total_attempted += ag["keywords_attempted"]
+        for err in ag["keyword_errors"][:3]:
+            console.print(f"    [yellow]! keyword error: {err}[/yellow]")
+    console.print(
+        f"  Negatives: {result['negatives']['copied']}/{result['negatives']['attempted']}"
+    )
+    if total_attempted and total_kw < total_attempted:
+        console.print(
+            f"[yellow]Note: {total_attempted - total_kw} keyword(s) failed to copy — review errors above.[/yellow]"
+        )
+    if result["source_paused"]:
+        console.print(f"  [dim]Source campaign {source_campaign_id} paused.[/dim]")
+    else:
+        console.print(
+            f"  [dim]Source campaign {source_campaign_id} unchanged. Pause it with "
+            f"'asa campaigns update {source_campaign_id} --status PAUSED' when you've verified the clone.[/dim]"
+        )
+
+
 @app.command("delete")
 def delete_campaign(
     campaign_id: Optional[int] = typer.Argument(None, help="Campaign ID to delete"),

@@ -232,33 +232,158 @@ class SearchAdsClient:
     def create_campaign(
         self,
         name: str,
-        budget: float,
-        countries: list[str],
+        budget: Optional[float] = None,
+        countries: Optional[list[str]] = None,
         daily_budget: Optional[float] = None,
         status: str = "ENABLED",
+        supply_sources: Optional[list[str]] = None,
+        ad_channel_type: str = "SEARCH",
+        billing_event: str = "TAPS",
     ) -> Optional[dict[str, Any]]:
-        """Create a new campaign."""
+        """Create a new campaign.
+
+        ``budget`` is the lifetime / total budget. Apple is discontinuing
+        lifetime budgets on 2026-06-16, so prefer leaving ``budget`` unset
+        and relying on ``daily_budget`` alone. After 2026-06-16 Apple will
+        reject campaigns with only a lifetime budget.
+        """
         if self.app_config is None:
             raise ValueError("No app config. Run 'asa config setup' first.")
+        if daily_budget is None and budget is None:
+            raise ValueError("Either daily_budget or budget (lifetime) must be provided.")
 
         try:
-            campaign_data = {
+            campaign_data: dict[str, Any] = {
                 "name": name,
                 "adamId": self.app_config.app_id,
-                "budgetAmount": {"amount": str(budget), "currency": "USD"},
                 "dailyBudgetAmount": {"amount": str(daily_budget or budget), "currency": "USD"},
-                "countriesOrRegions": countries,
+                "countriesOrRegions": countries or ["US"],
                 "status": status,
-                "supplySources": ["APPSTORE_SEARCH_RESULTS"],
-                "adChannelType": "SEARCH",
-                "billingEvent": "TAPS",
+                "supplySources": supply_sources or ["APPSTORE_SEARCH_RESULTS"],
+                "adChannelType": ad_channel_type,
+                "billingEvent": billing_event,
             }
+            if budget is not None:
+                campaign_data["budgetAmount"] = {"amount": str(budget), "currency": "USD"}
 
             response = self._request("POST", "/campaigns", data=campaign_data)
             return response.get("data") if isinstance(response, dict) else None
         except Exception as e:
             console.print(f"[red]Error creating campaign: {e}[/red]")
             return None
+
+    def clone_campaign(
+        self,
+        source_campaign_id: int,
+        new_name: Optional[str] = None,
+        *,
+        drop_lifetime_budget: bool = True,
+        pause_source: bool = False,
+    ) -> Optional[dict[str, Any]]:
+        """Duplicate a campaign (with ad groups, keywords, negatives).
+
+        Useful when a campaign is stuck in ``TOTAL_BUDGET_EXHAUSTED``
+        because clearing the lifetime budget via PUT doesn't reset
+        Apple's serving evaluator. Cloning produces a fresh campaign
+        with no exhaustion history.
+
+        Args:
+            source_campaign_id: The campaign to duplicate.
+            new_name: Defaults to "<source name> v2".
+            drop_lifetime_budget: If True (default), the clone is
+                created with dailyBudgetAmount only — the recommended
+                state ahead of Apple's 2026-06-16 lifetime-budget
+                removal.
+            pause_source: If True, pauses the source campaign after a
+                successful clone.
+
+        Returns:
+            A dict summarising the created campaign, ad groups, keyword
+            counts, and negative counts.
+        """
+        from datetime import datetime, timezone, timedelta
+
+        src = self._request("GET", f"/campaigns/{source_campaign_id}").get("data")
+        if not src:
+            console.print(f"[red]Source campaign {source_campaign_id} not found[/red]")
+            return None
+        src_ags = self._request("GET", f"/campaigns/{source_campaign_id}/adgroups").get("data", []) or []
+        src_negs = self._request("GET", f"/campaigns/{source_campaign_id}/negativekeywords").get("data", []) or []
+
+        new_payload: dict[str, Any] = {
+            "name": new_name or f"{src['name']} v2",
+            "adamId": src["adamId"],
+            "dailyBudgetAmount": src["dailyBudgetAmount"],
+            "countriesOrRegions": src["countriesOrRegions"],
+            "status": "ENABLED",
+            "supplySources": src["supplySources"],
+            "adChannelType": src["adChannelType"],
+            "billingEvent": src["billingEvent"],
+        }
+        if not drop_lifetime_budget and src.get("budgetAmount"):
+            new_payload["budgetAmount"] = src["budgetAmount"]
+
+        new_camp = self._request("POST", "/campaigns", data=new_payload).get("data")
+        if not new_camp:
+            return None
+        new_id = new_camp["id"]
+
+        # Ad groups + keywords
+        start = (datetime.now(timezone.utc) + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.000")
+        ag_reports = []
+        for src_ag in src_ags:
+            ag_payload = {
+                "name": src_ag["name"],
+                "startTime": start,
+                "defaultBidAmount": src_ag["defaultBidAmount"],
+                "automatedKeywordsOptIn": src_ag.get("automatedKeywordsOptIn", False),
+                "targetingDimensions": src_ag.get("targetingDimensions"),
+                "pricingModel": src_ag["pricingModel"],
+                "status": "ENABLED",
+            }
+            ag_payload = {k: v for k, v in ag_payload.items() if v is not None}
+            new_ag = self._request("POST", f"/campaigns/{new_id}/adgroups", data=ag_payload).get("data")
+            if not new_ag:
+                continue
+
+            src_kws = self._request("GET", f"/campaigns/{source_campaign_id}/adgroups/{src_ag['id']}/targetingkeywords").get("data", []) or []
+            active_kws = [k for k in src_kws if k.get("status") == "ACTIVE"]
+            kw_payload = [
+                {"text": k["text"], "matchType": k["matchType"], "bidAmount": k["bidAmount"]}
+                for k in active_kws
+            ]
+            if kw_payload:
+                resp = self._request("POST", f"/campaigns/{new_id}/adgroups/{new_ag['id']}/targetingkeywords/bulk", data=kw_payload)
+                created = len(resp.get("data") or [])
+                errors = (resp.get("error") or {}).get("errors") or []
+            else:
+                created, errors = 0, []
+            ag_reports.append({
+                "old_id": src_ag["id"], "new_id": new_ag["id"], "name": src_ag["name"],
+                "keywords_copied": created, "keywords_attempted": len(active_kws),
+                "keyword_errors": errors,
+            })
+
+        # Campaign-level negatives
+        neg_report = {"copied": 0, "attempted": 0, "errors": []}
+        if src_negs:
+            neg_payload = [{"text": n["text"], "matchType": n["matchType"]} for n in src_negs]
+            resp = self._request("POST", f"/campaigns/{new_id}/negativekeywords/bulk", data=neg_payload)
+            neg_report["copied"] = len(resp.get("data") or [])
+            neg_report["attempted"] = len(src_negs)
+            neg_report["errors"] = (resp.get("error") or {}).get("errors") or []
+
+        if pause_source:
+            self.update_campaign(source_campaign_id, {"status": "PAUSED"})
+
+        return {
+            "source_id": source_campaign_id,
+            "new_id": new_id,
+            "new_name": new_camp["name"],
+            "ad_groups": ag_reports,
+            "negatives": neg_report,
+            "source_paused": pause_source,
+        }
 
     def update_campaign(self, campaign_id: int, updates: dict[str, Any]) -> Optional[dict[str, Any]]:
         """Update a campaign."""
