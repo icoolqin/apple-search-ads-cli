@@ -113,6 +113,7 @@ def list_campaigns(
     table.add_column("Type", style="green")
     table.add_column("Status")
     table.add_column("Daily Budget")
+    table.add_column("Lifetime")
     if show_bids:
         table.add_column("Ad Group Bids")
     else:
@@ -126,6 +127,21 @@ def list_campaigns(
         status = campaign.get("displayStatus", campaign.get("status", "UNKNOWN"))
         daily_budget = campaign.get("dailyBudgetAmount", {})
         budget_str = f"${daily_budget.get('amount', '?')} {daily_budget.get('currency', '')}"
+
+        # Lifetime budget — flag campaigns that silently stopped serving
+        # because they hit their lifetime cap. Apple is discontinuing
+        # lifetime budgets on 2026-06-16, so flag these everywhere.
+        lt = campaign.get("budgetAmount") or {}
+        lt_amt = lt.get("amount") if isinstance(lt, dict) else None
+        serving = campaign.get("servingStatus", "")
+        user_status = campaign.get("status", "")
+        if lt_amt is None:
+            lt_str = "[dim]—[/dim]"
+        elif user_status == "ENABLED" and serving != "RUNNING":
+            lt_str = f"[red]${lt_amt} CAPPED[/red]"
+        else:
+            lt_str = f"[yellow]${lt_amt}[/yellow]"
+
         countries = ", ".join(campaign.get("countriesOrRegions", []))
 
         status_style = "green" if status == "RUNNING" else "yellow" if status == "PAUSED" else "red"
@@ -138,6 +154,7 @@ def list_campaigns(
                 ctype_str,
                 f"[{status_style}]{status}[/{status_style}]",
                 budget_str,
+                lt_str,
                 bid_str[:50] + "..." if len(bid_str) > 50 else bid_str,
             )
         else:
@@ -147,6 +164,7 @@ def list_campaigns(
                 ctype_str,
                 f"[{status_style}]{status}[/{status_style}]",
                 budget_str,
+                lt_str,
                 countries[:20] + "..." if len(countries) > 20 else countries,
             )
 
@@ -487,16 +505,28 @@ def update_campaign(
     campaign_id: int = typer.Argument(..., help="Campaign ID to update"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="New campaign name"),
     budget: Optional[float] = typer.Option(None, "--budget", "-b", help="New daily budget (USD)"),
+    lifetime_budget: Optional[float] = typer.Option(
+        None, "--lifetime-budget", "-L",
+        help="New lifetime budget (USD). NOTE: Apple is discontinuing lifetime budgets on 2026-06-16; prefer --clear-lifetime.",
+    ),
+    clear_lifetime: bool = typer.Option(
+        False, "--clear-lifetime",
+        help="Remove the lifetime budget cap on the campaign (sets budgetAmount=null). Use this to unblock campaigns that silently stopped serving after hitting their lifetime cap.",
+    ),
     status: Optional[str] = typer.Option(None, "--status", "-s", help="New status (ENABLED or PAUSED)"),
 ):
-    """Update a campaign's name, budget, or status."""
+    """Update a campaign's name, budget, lifetime budget, or status."""
     credentials = load_credentials()
     if not credentials:
         console.print("[red]No credentials configured. Run 'asa config setup' first.[/red]")
         raise typer.Exit(1)
 
-    if not any([name, budget, status]):
-        console.print("[red]No updates provided. Use --name, --budget, or --status.[/red]")
+    if not any([name, budget, lifetime_budget, clear_lifetime, status]):
+        console.print("[red]No updates provided. Use --name, --budget, --lifetime-budget, --clear-lifetime, or --status.[/red]")
+        raise typer.Exit(1)
+
+    if lifetime_budget is not None and clear_lifetime:
+        console.print("[red]Use either --lifetime-budget or --clear-lifetime, not both.[/red]")
         raise typer.Exit(1)
 
     client = SearchAdsClient(credentials)
@@ -518,6 +548,18 @@ def update_campaign(
         updates["dailyBudgetAmount"] = {"amount": str(budget), "currency": "USD"}
         old_budget = campaign.get("dailyBudgetAmount", {}).get("amount", "?")
         changes.append(f"Daily Budget: ${old_budget} -> ${budget}")
+
+    if clear_lifetime:
+        updates["budgetAmount"] = None
+        old = campaign.get("budgetAmount") or {}
+        old_amt = old.get("amount") if isinstance(old, dict) else None
+        changes.append(f"Lifetime Budget: ${old_amt or '-'} -> cleared")
+
+    if lifetime_budget is not None:
+        updates["budgetAmount"] = {"amount": str(lifetime_budget), "currency": "USD"}
+        old = campaign.get("budgetAmount") or {}
+        old_amt = old.get("amount") if isinstance(old, dict) else "-"
+        changes.append(f"Lifetime Budget: ${old_amt} -> ${lifetime_budget}")
 
     if status:
         status_upper = status.upper()
