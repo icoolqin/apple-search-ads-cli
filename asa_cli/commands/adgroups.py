@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.table import Table
 
 from ..api import SearchAdsClient
-from ..config import load_credentials
+from ..config import ORG_CURRENCY, load_credentials
 
 app = typer.Typer(help="Ad group management commands")
 console = Console()
@@ -148,7 +148,7 @@ def update_adgroup(
         changes.append(f"Name → {name}")
 
     if bid is not None:
-        updates["defaultBidAmount"] = {"amount": str(bid), "currency": "USD"}
+        updates["defaultBidAmount"] = {"amount": str(bid), "currency": ORG_CURRENCY}
         changes.append(f"Default Bid → ${bid}")
 
     if search_match is not None:

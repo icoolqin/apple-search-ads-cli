@@ -11,6 +11,7 @@ from rich.table import Table
 from ..api import SearchAdsClient
 from ..config import (
     CAMPAIGN_STRUCTURE,
+    ORG_CURRENCY,
     CampaignType,
     detect_campaign_type,
     get_campaign_name,
@@ -241,7 +242,8 @@ def setup_campaigns(
         with console.status(f"[bold blue]Creating {ctype.value} campaign..."):
             campaign = client.create_campaign(
                 name=campaign_name,
-                budget=budget * 30,  # Monthly budget
+                # Daily budget only — Apple discontinued lifetime budgets 2026-06-16
+                # (LIFETIME_BUDGET_NOT_SUPPORTED).
                 daily_budget=budget,
                 countries=country_list,
             )
@@ -485,7 +487,8 @@ def create_campaign(
     with console.status("[bold blue]Creating campaign..."):
         campaign = client.create_campaign(
             name=name,
-            budget=budget * 30,  # Monthly budget estimate
+            # Daily budget only — Apple discontinued lifetime budgets 2026-06-16
+            # (LIFETIME_BUDGET_NOT_SUPPORTED).
             daily_budget=budget,
             countries=country_list,
             status=status_upper,
@@ -545,7 +548,7 @@ def update_campaign(
         changes.append(f"Name: {campaign.get('name')} -> {name}")
 
     if budget:
-        updates["dailyBudgetAmount"] = {"amount": str(budget), "currency": "USD"}
+        updates["dailyBudgetAmount"] = {"amount": str(budget), "currency": ORG_CURRENCY}
         old_budget = campaign.get("dailyBudgetAmount", {}).get("amount", "?")
         changes.append(f"Daily Budget: ${old_budget} -> ${budget}")
 
@@ -556,7 +559,7 @@ def update_campaign(
         changes.append(f"Lifetime Budget: ${old_amt or '-'} -> cleared")
 
     if lifetime_budget is not None:
-        updates["budgetAmount"] = {"amount": str(lifetime_budget), "currency": "USD"}
+        updates["budgetAmount"] = {"amount": str(lifetime_budget), "currency": ORG_CURRENCY}
         old = campaign.get("budgetAmount") or {}
         old_amt = old.get("amount") if isinstance(old, dict) else "-"
         changes.append(f"Lifetime Budget: ${old_amt} -> ${lifetime_budget}")

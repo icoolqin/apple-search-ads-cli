@@ -18,6 +18,37 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"
 
 
+def get_org_currency() -> str:
+    """Currency code for every Money payload ({"amount", "currency"}).
+
+    Apple rejects any write whose currency != the organization's currency with
+    ``NOT_SAME_CURRENCY_AS_ORG_CURRENCY``. Upstream hardcoded "USD" in ~12 spots;
+    this resolves it from a single source instead. Resolution order:
+
+      1. ``ASA_CURRENCY`` environment variable (e.g. ``export ASA_CURRENCY=RMB``)
+      2. top-level ``"currency"`` key in ~/.asa-cli/config.json
+      3. ``"USD"`` (upstream default)
+
+    config.json lives in the home dir and survives CLI reinstalls, so setting it
+    there once means you never re-patch the code after an upgrade.
+    """
+    env = os.environ.get("ASA_CURRENCY")
+    if env:
+        return env.strip().upper()
+    try:
+        if CONFIG_FILE.exists():
+            cur = json.loads(CONFIG_FILE.read_text()).get("currency")
+            if cur:
+                return str(cur).strip().upper()
+    except Exception:
+        pass
+    return "USD"
+
+
+# Evaluated once per CLI invocation (process is short-lived).
+ORG_CURRENCY = get_org_currency()
+
+
 class CampaignType(str, Enum):
     """Campaign types following Apple's 4-campaign structure."""
 
@@ -131,6 +162,11 @@ class AppConfig(BaseModel):
     default_countries: list[str] = Field(default=["US"], description="Default target countries")
     default_bid: float = Field(default=1.50, description="Default keyword bid in USD")
     default_cpa_goal: Optional[float] = Field(None, description="Default CPA goal in USD")
+    device_classes: list[str] = Field(
+        default=["IPHONE", "IPAD"],
+        description="Ad group deviceClass targeting. Use ['IPHONE'] for iPhone-only "
+        "apps, else Apple returns UNSUPPORTED_DEVICE_CLASS on ad group create.",
+    )
 
 
 class MultiAppConfig(BaseModel):

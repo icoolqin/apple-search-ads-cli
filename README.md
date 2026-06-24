@@ -2,6 +2,26 @@
 
 > **The missing command-line interface for Apple Search Ads.** Manage campaigns, keywords, and reporting using Apple's recommended 4-campaign structure.
 
+> ### 🔧 Fork changes (icoolqin)
+> This fork fixes real breakages we hit running a non-USD (RMB) account and adds
+> robustness over upstream. Changes:
+> - **Currency is no longer hardcoded.** Upstream wrote `"currency": "USD"` in ~12
+>   payloads, so every write on a non-USD org failed with
+>   `NOT_SAME_CURRENCY_AS_ORG_CURRENCY`. Now resolved from a single source
+>   (`config.get_org_currency()`): `ASA_CURRENCY` env var → top-level `currency`
+>   in `~/.asa-cli/config.json` → `USD`. Because `config.json` survives reinstalls,
+>   you set it once and never re-patch.
+> - **`ads list` no longer 500s.** Apple's `POST /ads/find` selector endpoint
+>   returns HTTP 500 on our org; `find_ads()` now aggregates the working
+>   per-ad-group `GET …/adgroups/{id}/ads` instead, annotating each ad with its
+>   campaign/ad-group id.
+> - **Configurable device targeting.** New `AppConfig.device_classes` (default
+>   `["IPHONE","IPAD"]`); set `["IPHONE"]` for iPhone-only apps to avoid
+>   `UNSUPPORTED_DEVICE_CLASS` on ad-group create.
+> - **No more lifetime budgets.** `campaigns setup/create` pass daily budget only
+>   (Apple discontinued lifetime budgets 2026-06-16, `LIFETIME_BUDGET_NOT_SUPPORTED`).
+> - `config show` now displays the active currency and device targeting.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Apple Ads API v5](https://img.shields.io/badge/Apple%20Ads%20API-v5-black.svg)](https://developer.apple.com/documentation/apple_ads)

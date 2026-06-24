@@ -11,6 +11,7 @@ from rich.table import Table
 from ..api import SearchAdsClient
 from ..config import (
     CAMPAIGN_STRUCTURE,
+    ORG_CURRENCY,
     CampaignType,
     MatchType,
     detect_campaign_type,
@@ -1243,7 +1244,7 @@ def update_bids_bulk(
 
     # Build bulk update payload
     updates = [
-        {"id": kw.get("id"), "bidAmount": {"amount": str(bid), "currency": "USD"}}
+        {"id": kw.get("id"), "bidAmount": {"amount": str(bid), "currency": ORG_CURRENCY}}
         for kw in keywords
     ]
 

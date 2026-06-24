@@ -8,7 +8,7 @@ import jwt
 import requests
 from rich.console import Console
 
-from .config import AppConfig, Credentials, MatchType, get_current_app_config, load_credentials
+from .config import ORG_CURRENCY, AppConfig, Credentials, MatchType, get_current_app_config, load_credentials
 
 console = Console()
 
@@ -256,7 +256,7 @@ class SearchAdsClient:
             campaign_data: dict[str, Any] = {
                 "name": name,
                 "adamId": self.app_config.app_id,
-                "dailyBudgetAmount": {"amount": str(daily_budget or budget), "currency": "USD"},
+                "dailyBudgetAmount": {"amount": str(daily_budget or budget), "currency": ORG_CURRENCY},
                 "countriesOrRegions": countries or ["US"],
                 "status": status,
                 "supplySources": supply_sources or ["APPSTORE_SEARCH_RESULTS"],
@@ -264,7 +264,7 @@ class SearchAdsClient:
                 "billingEvent": billing_event,
             }
             if budget is not None:
-                campaign_data["budgetAmount"] = {"amount": str(budget), "currency": "USD"}
+                campaign_data["budgetAmount"] = {"amount": str(budget), "currency": ORG_CURRENCY}
 
             response = self._request("POST", "/campaigns", data=campaign_data)
             return response.get("data") if isinstance(response, dict) else None
@@ -447,7 +447,7 @@ class SearchAdsClient:
 
             ad_group_data = {
                 "name": name,
-                "defaultBidAmount": {"amount": str(default_bid), "currency": "USD"},
+                "defaultBidAmount": {"amount": str(default_bid), "currency": ORG_CURRENCY},
                 "automatedKeywordsOptIn": search_match_enabled,
                 "pricingModel": "CPC",
                 "startTime": start_time,
@@ -461,12 +461,15 @@ class SearchAdsClient:
                         "excluded": [str(self.app_config.app_id)],
                     },
                     "deviceClass": {
-                        "included": ["IPHONE", "IPAD"],
+                        "included": list(
+                            getattr(self.app_config, "device_classes", None)
+                            or ["IPHONE", "IPAD"]
+                        ),
                     },
                 }
 
             if cpa_goal:
-                ad_group_data["cpaGoal"] = {"amount": str(cpa_goal), "currency": "USD"}
+                ad_group_data["cpaGoal"] = {"amount": str(cpa_goal), "currency": ORG_CURRENCY}
 
             response = self._request(
                 "POST", f"/campaigns/{campaign_id}/adgroups", data=ad_group_data
@@ -545,7 +548,7 @@ class SearchAdsClient:
             {
                 "text": kw.strip().lower(),
                 "matchType": match_type.value,
-                "bidAmount": {"amount": str(default_bid), "currency": "USD"},
+                "bidAmount": {"amount": str(default_bid), "currency": ORG_CURRENCY},
             }
             for kw in keywords
             if kw.strip()
@@ -672,7 +675,7 @@ class SearchAdsClient:
         try:
             # Use bulk update endpoint with keyword object including ID
             update_data = [
-                {"id": keyword_id, "bidAmount": {"amount": str(bid_amount), "currency": "USD"}}
+                {"id": keyword_id, "bidAmount": {"amount": str(bid_amount), "currency": ORG_CURRENCY}}
             ]
             response = self._request(
                 "PUT",
@@ -921,7 +924,7 @@ class SearchAdsClient:
             campaign_id: Campaign ID
             ad_group_id: Ad group ID
             updates: List of update dicts, e.g.
-                [{"id": 123, "bidAmount": {"amount": "2.5", "currency": "USD"}}, ...]
+                [{"id": 123, "bidAmount": {"amount": "2.5", "currency": ORG_CURRENCY}}, ...]
 
         Returns:
             List of updated keyword data, or None on failure
@@ -1318,7 +1321,7 @@ class SearchAdsClient:
         try:
             bo_data: dict[str, Any] = {
                 "name": name,
-                "budget": {"amount": str(budget), "currency": "USD"},
+                "budget": {"amount": str(budget), "currency": ORG_CURRENCY},
                 "startDate": start_date,
                 "endDate": end_date,
             }
@@ -1625,31 +1628,39 @@ class SearchAdsClient:
     def find_ads(
         self, campaign_id: Optional[int] = None, conditions: Optional[list[dict[str, Any]]] = None
     ) -> list[dict[str, Any]]:
-        """Find ads using selector conditions.
+        """List ads across a campaign (or the whole org) by walking ad groups.
+
+        Apple's ``POST /ads/find`` and ``POST /campaigns/{id}/ads/find`` selector
+        endpoints return HTTP 500 on this org, but the per-ad-group
+        ``GET /campaigns/{cid}/adgroups/{agid}/ads`` works fine — so we aggregate
+        that instead. Each returned ad is annotated with its ``campaignId`` /
+        ``adGroupId`` so callers can tell where it lives.
 
         Args:
-            campaign_id: Optional campaign ID to scope the search
-            conditions: Optional selector conditions for filtering
+            campaign_id: Optional campaign ID to scope the search; otherwise all
+                campaigns are scanned.
+            conditions: Unused; kept for backward compatibility.
 
         Returns:
-            List of matching ads
+            List of matching ads.
         """
         try:
-            selector: dict[str, Any] = {
-                "pagination": {"offset": 0, "limit": 1000},
-            }
-            if conditions:
-                selector["conditions"] = conditions
-
-            data = {"selector": selector}
-
             if campaign_id:
-                endpoint = f"/campaigns/{campaign_id}/ads/find"
+                campaign_ids = [campaign_id]
             else:
-                endpoint = "/ads/find"
+                campaign_ids = [c["id"] for c in self.get_campaigns() if c.get("id")]
 
-            response = self._request("POST", endpoint, data=data)
-            return response.get("data", []) if isinstance(response, dict) else []
+            ads: list[dict[str, Any]] = []
+            for cid in campaign_ids:
+                for ag in self.get_ad_groups(cid):
+                    agid = ag.get("id")
+                    if not agid:
+                        continue
+                    for ad in self.get_ads(cid, agid):
+                        ad.setdefault("campaignId", cid)
+                        ad.setdefault("adGroupId", agid)
+                        ads.append(ad)
+            return ads
         except Exception as e:
             console.print(f"[red]Error finding ads: {e}[/red]")
             return []
