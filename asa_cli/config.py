@@ -359,6 +359,23 @@ def get_campaign_name(campaign_type: CampaignType, app_name: Optional[str] = Non
     return type_name
 
 
+def campaign_matches_app(name: str, app_name: Optional[str] = None) -> bool:
+    """Return True if a campaign name belongs to the given app.
+
+    In single-app mode (``app_name`` is None) every campaign matches. In
+    multi-app mode the campaign name must contain the app-name prefix.
+
+    Unlike :func:`detect_campaign_type`, this does NOT require the campaign to
+    match one of the known campaign types, so custom campaigns (e.g. "Pet")
+    are still considered part of the app.
+    """
+    if not app_name:
+        return True
+    clean_app = re.sub(r"[^a-z0-9]", "", app_name.lower())
+    clean_name = re.sub(r"[^a-z0-9]", "", name.lower())
+    return clean_app in clean_name
+
+
 def detect_campaign_type(name: str, app_name: Optional[str] = None) -> Optional[CampaignType]:
     """Detect campaign type from a campaign name (case-insensitive).
 
@@ -367,14 +384,11 @@ def detect_campaign_type(name: str, app_name: Optional[str] = None) -> Optional[
 
     Returns the CampaignType or None if not detected.
     """
-    name_lower = name.lower()
-
     # If app_name is provided, require it in the campaign name
-    if app_name:
-        clean_app = re.sub(r"[^a-z0-9]", "", app_name.lower())
-        if clean_app not in re.sub(r"[^a-z0-9]", "", name_lower):
-            return None
+    if not campaign_matches_app(name, app_name):
+        return None
 
+    name_lower = name.lower()
     for ctype, type_name in CAMPAIGN_TYPE_NAMES.items():
         if type_name.lower() in name_lower:
             return ctype

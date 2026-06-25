@@ -14,6 +14,7 @@ from ..config import (
     ORG_CURRENCY,
     CampaignType,
     MatchType,
+    campaign_matches_app,
     detect_campaign_type,
     get_current_app_config,
     is_multi_app,
@@ -385,7 +386,7 @@ def add_keywords(
 def add_negatives(
     keywords: str = typer.Argument(..., help="Comma-separated keywords to block"),
     all_campaigns: bool = typer.Option(
-        False, "--all", "-a", help="Add to all managed campaigns"
+        False, "--all", "-a", help="Add to every campaign (all types, including custom ones)"
     ),
     campaign_id: Optional[int] = typer.Option(None, "--campaign", "-c", help="Specific campaign ID"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview without adding"),
@@ -415,8 +416,11 @@ def add_negatives(
             target_campaigns = [campaign]
     elif all_campaigns:
         campaigns = client.get_campaigns()
-        # Include campaigns with recognized types
-        target_campaigns = [c for c in campaigns if detect_campaign_type(c.get("name", ""), app_name=app_name)]
+        # Include every campaign for this app, regardless of whether its name
+        # matches a known type. This covers custom campaigns (e.g. "Pet") and
+        # any campaigns added in the future. In multi-app mode, scope to the
+        # active app via the name prefix.
+        target_campaigns = [c for c in campaigns if campaign_matches_app(c.get("name", ""), app_name)]
     else:
         campaign = select_campaign(client)
         if campaign:

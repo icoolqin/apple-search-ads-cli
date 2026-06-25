@@ -14,6 +14,7 @@ from asa_cli.config import (
     CampaignType,
     Credentials,
     MultiAppConfig,
+    campaign_matches_app,
     detect_campaign_type,
     get_active_app_config,
     get_app_slug,
@@ -126,6 +127,34 @@ class TestCampaignTypeDetection:
         """Test unscoped detection matches any campaign with type keyword."""
         assert detect_campaign_type("StitchIt - Brand") == CampaignType.BRAND
         assert detect_campaign_type("ColorCub - Discovery") == CampaignType.DISCOVERY
+
+
+class TestCampaignMatchesApp:
+    """Tests for the app-scoping predicate used by `add-negatives --all`."""
+
+    def test_single_app_matches_everything(self):
+        """Without an app_name, every campaign matches (single-app mode)."""
+        assert campaign_matches_app("Brand") is True
+        assert campaign_matches_app("Pet") is True
+        assert campaign_matches_app("Some Random Name") is True
+
+    def test_custom_campaign_matches_even_without_known_type(self):
+        """Custom campaigns with no known type keyword still match.
+
+        This is the behavior that makes `--all` truly include all campaigns
+        (e.g. the user's two "Pet" campaigns), unlike detect_campaign_type.
+        """
+        assert campaign_matches_app("Pet") is True
+        assert detect_campaign_type("Pet") is None
+
+    def test_multi_app_requires_app_prefix(self):
+        """In multi-app mode, only campaigns for the active app match."""
+        assert campaign_matches_app("StitchIt - Pet", app_name="Stitch It") is True
+        assert campaign_matches_app("StitchIt - Brand", app_name="ColorCub") is False
+
+    def test_multi_app_matches_own_custom_campaign(self):
+        """A custom campaign for the active app matches even with no type."""
+        assert campaign_matches_app("ColorCub - Pet", app_name="ColorCub") is True
 
 
 class TestCampaignStructure:
